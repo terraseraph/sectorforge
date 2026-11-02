@@ -1,0 +1,5 @@
+/target
+**/*.img
+**/*.map
+*.log
+.DS_Store
