@@ -6,6 +6,7 @@ import { IDLE, useApp } from "./app";
 import { tilesFromProgress, useImage } from "./image";
 import { files, useRecover } from "./recover";
 import { useScan } from "./scan";
+import { useVerify } from "./verify";
 
 const FILES_REDRAW_MS = 200;
 let filesRedraw: ReturnType<typeof setTimeout> | undefined;
@@ -22,7 +23,8 @@ function flushFilesRedraw() {
 }
 
 /** Events for a job this page didn't start (another browser tab on the dev bridge) must not land here. */
-const ours = (job: string) => useApp.getState().running === job;
+// The startup survey runs beside any user job and only adds facts about drives, so it is always welcome.
+const ours = (job: string) => job === "survey" || useApp.getState().running === job;
 
 export function onFiles(job: Job, rows: FileRow[]) {
   if (!ours(job)) return;
@@ -39,8 +41,10 @@ export function onEvent(job: Job, ev: Ev) {
   if (!ours(job)) return;
   if (ev.event === "error") {
     useApp.setState({ error: ev.message });
+    if (job === "scan") useScan.setState((s) => ({ errors: { ...s.errors, [s.scanning.trim().toLowerCase()]: ev.message } }));
     return;
   }
+  if (job === "survey") return onSurveyEvent(ev);
   if (ev.event === "start") useApp.setState({ jobMode: ev.mode });
   // A step with no numbers (opening a volume, preallocating a file): just say what it is.
   if (ev.event === "phase") return activity(`${ev.message}...`);
@@ -56,6 +60,8 @@ export function onEvent(job: Job, ev: Ev) {
       return onExtractEvent(ev);
     case "carve":
       return onCarveEvent(ev);
+    case "hash":
+      return onHashEvent(ev);
   }
 }
 
@@ -95,9 +101,12 @@ function onScanEvent(ev: Ev) {
       break;
     }
     case "result":
-      useScan.setState((s) => ({
-        result: { kind: ev.table_kind, partitions: ev.partitions, source: s.scanning, deviceSize: s.deviceSize },
-      }));
+      useScan.setState((s) => {
+        const result = { kind: ev.table_kind, partitions: ev.partitions, source: s.scanning, deviceSize: s.deviceSize };
+        const key = s.scanning.trim().toLowerCase();
+        const { [key]: _cleared, ...errors } = s.errors;
+        return { result, bySource: { ...s.bySource, [key]: result }, errors };
+      });
       break;
   }
 }
@@ -169,11 +178,43 @@ function onCarveEvent(ev: Ev) {
   }
 }
 
+function onSurveyEvent(ev: Ev) {
+  if (ev.event !== "survey_result" && ev.event !== "survey_error") return;
+  const key = ev.source.trim().toLowerCase();
+  useScan.setState((s) => {
+    const surveying = s.surveying.filter((k) => k !== key);
+    if (ev.event === "survey_error") return { surveying, errors: { ...s.errors, [key]: ev.message } };
+    const { [key]: _cleared, ...errors } = s.errors;
+    const result = { kind: ev.table_kind, partitions: ev.partitions, source: ev.source, deviceSize: ev.size };
+    return { surveying, errors, bySource: { ...s.bySource, [key]: result } };
+  });
+}
+
+function onHashEvent(ev: Ev) {
+  switch (ev.event) {
+    case "start":
+      useVerify.setState({ size: ev.size, done: 0 });
+      break;
+    case "hash_progress":
+      useVerify.setState({ done: ev.bytes_done, size: ev.bytes_total });
+      activity(`Computing SHA-256: ${fmtBytes(ev.bytes_done)} of ${fmtBytes(ev.bytes_total)} read (${percent(ev.bytes_done, ev.bytes_total).toFixed(1)}%).`);
+      break;
+    case "done":
+      if (ev.sha256) {
+        const sha256 = ev.sha256;
+        useVerify.setState((s) => ({ results: [{ source: s.hashing, size: s.size, sha256, at: new Date() }, ...s.results] }));
+      }
+      break;
+  }
+}
+
 type Outcome = "done" | "stopped" | "error";
 const outcomeOf = (code: number | null): Outcome => (code === 0 ? "done" : code === null ? "stopped" : "error");
 
 export function onExit(x: Exit) {
   if (!ours(x.job)) return;
+  // Not a user job: nothing is "running", so leave the status line alone.
+  if (x.job === "survey") return useScan.setState({ surveying: [] });
   const outcome = outcomeOf(x.code);
   // A non-zero exit that never sent an `error` event (crash, usage error) still needs explaining.
   if (outcome === "error" && !useApp.getState().error) {
@@ -226,6 +267,10 @@ export function onExit(x: Exit) {
         },
       }));
       text = said("Idle. Carving finished.", "Carving stopped.", "Carving stopped by an error.");
+      break;
+    case "hash":
+      useVerify.setState({ hashing: "" });
+      text = said("Idle. Hash finished.", "Hashing stopped.", "Hashing stopped by an error.");
       break;
   }
   useApp.setState({ running: null, activity: text });

@@ -138,6 +138,25 @@ describe("events", () => {
     expect(useApp.getState().activity).toBe(IDLE);
   });
 
+  test("a scan read error sticks to that drive until a later scan of it succeeds", () => {
+    useApp.setState({ running: "scan" });
+    useScan.setState({ scanning: "D3" });
+    onEvent("scan", { event: "error", message: "I/O device error" });
+    expect(useScan.getState().errors).toEqual({ d3: "I/O device error" });
+    onEvent("scan", { event: "result", table_kind: "gpt", partitions: [] });
+    expect(useScan.getState().errors).toEqual({});
+    expect(useScan.getState().bySource.d3).toMatchObject({ kind: "gpt" });
+  });
+
+  test("survey results fill each drive in, even with no job running", () => {
+    useScan.setState({ surveying: ["a", "b"] });
+    onEvent("survey", { event: "survey_result", source: "A", size: 100, table_kind: "gpt", partitions: [] });
+    onEvent("survey", { event: "survey_error", source: "B", message: "I/O device error" });
+    expect(useScan.getState()).toMatchObject({ surveying: [], errors: { b: "I/O device error" }, bySource: { a: { kind: "gpt", deviceSize: 100 } } });
+    onExit({ job: "survey", code: 0, stderr: "" });
+    expect(useApp.getState()).toMatchObject({ running: null, activity: IDLE, error: "" });
+  });
+
   test("the scan result remembers which source it belongs to", () => {
     useApp.setState({ running: "scan" });
     useScan.setState({ scanning: "E:\\disk.img" });

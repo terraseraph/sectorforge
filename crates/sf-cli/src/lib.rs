@@ -74,6 +74,17 @@ enum Command {
         #[arg(long)]
         deep: bool,
     },
+    /// Quick partition-table scan of several drives or images in parallel.
+    Survey {
+        /// Repeat for each source.
+        #[arg(long, required = true)]
+        source: Vec<String>,
+    },
+    /// SHA-256 of a whole device or image, to check a copy matches its source.
+    Hash {
+        #[arg(long)]
+        source: String,
+    },
     /// Print the version and the JSON contract version.
     Version,
     /// List physical drives.
@@ -428,6 +439,93 @@ fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn partitions_json(result: &partitions::ScanResult) -> Vec<Value> {
+    result
+        .partitions
+        .iter()
+        .map(|p| {
+            json!({
+                "start_lba": p.start_bytes / 512,
+                "size_sectors": p.size_bytes.map(|s| s / 512),
+                "filesystem": fs_name(p.filesystem),
+                "confidence": confidence_name(p.confidence),
+                "source": source_name(p.source),
+                "label": p.label,
+            })
+        })
+        .collect()
+}
+
+/// Quick (partition table only) scan of several sources at once, one thread each, so a
+/// slow or failing drive delays only its own result. Never fails as a whole.
+fn run_survey(out: Out, sources: &[String]) -> anyhow::Result<()> {
+    std::thread::scope(|s| {
+        for source in sources {
+            s.spawn(move || {
+                let scanned = open_device(source).and_then(|mut dev| {
+                    let size = dev.size_bytes();
+                    Ok((size, partitions::scan(&mut dev, false, |_, _| {})?))
+                });
+                match scanned {
+                    Ok((size, r)) if out.json => out.event(json!({
+                        "event": "survey_result", "source": source, "size": size,
+                        "table_kind": table_name(r.table_kind), "partitions": partitions_json(&r),
+                    })),
+                    Ok((size, r)) => println!("{source}: {} bytes, {} table, {} partitions", size, table_name(r.table_kind), r.partitions.len()),
+                    Err(e) if out.json => out.event(json!({"event": "survey_error", "source": source, "message": format!("{e:#}")})),
+                    Err(e) => eprintln!("{source}: {e:#}"),
+                }
+            });
+        }
+    });
+    out.event(json!({"event": "done"}));
+    Ok(())
+}
+
+fn run_hash(out: Out, source: &str) -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
+    const CHUNK: u64 = 4 << 20;
+
+    let mut device = open_device(source)?;
+    let size = device.size_bytes();
+    out.event(json!({
+        "event": "start",
+        "source": source,
+        "mode": mode_name(source),
+        "size": size,
+        "sector_size": device.sector_size(),
+    }));
+    out.phase(format!("Reading all {} of {source} to compute its SHA-256", format_bytes(size)));
+
+    let mut buf = sf_core::aligned_buf::AlignedBuf::new(CHUNK as usize, device.sector_size().max(4096) as usize);
+    let mut hasher = Sha256::new();
+    let mut throttle = Throttle::new();
+    let mut pos = 0u64;
+    while pos < size {
+        let n = CHUNK.min(size - pos) as usize;
+        device.read_at(pos, &mut buf[..n]).map_err(|e| {
+            anyhow::anyhow!("can't read {source} at byte {pos}: {e}. A drive with unreadable sectors has no single hash; image it first and hash the image")
+        })?;
+        hasher.update(&buf[..n]);
+        pos += n as u64;
+        if pos == size || throttle.ready() {
+            if out.json {
+                out.event(json!({"event": "hash_progress", "bytes_done": pos, "bytes_total": size}));
+            } else {
+                eprint!("
+Hashed {:>6.2}%", 100.0 * pos as f64 / size.max(1) as f64);
+            }
+        }
+    }
+    let hex = format!("{:x}", hasher.finalize());
+    out.event(json!({"event": "done", "sha256": hex}));
+    if !out.json {
+        eprintln!();
+        println!("{hex}  {source}");
+    }
+    Ok(())
+}
+
 fn run_status(out: Out, map_path: &PathBuf) -> anyhow::Result<()> {
     let m = MapFile::load(map_path)?;
     if out.json {
@@ -477,21 +575,7 @@ fn run_scan(out: Out, source: &str, deep: bool) -> anyhow::Result<()> {
     })?;
 
     if out.json {
-        let parts: Vec<Value> = result
-            .partitions
-            .iter()
-            .map(|p| {
-                json!({
-                    "start_lba": p.start_bytes / 512,
-                    "size_sectors": p.size_bytes.map(|s| s / 512),
-                    "filesystem": fs_name(p.filesystem),
-                    "confidence": confidence_name(p.confidence),
-                    "source": source_name(p.source),
-                    "label": p.label,
-                })
-            })
-            .collect();
-        out.event(json!({"event": "result", "table_kind": table_name(result.table_kind), "partitions": parts}));
+        out.event(json!({"event": "result", "table_kind": table_name(result.table_kind), "partitions": partitions_json(&result)}));
     } else {
         eprintln!();
         println!("Partition table: {}", table_name(result.table_kind));
@@ -553,6 +637,8 @@ where
         ),
         Command::Status { map } => run_status(out, &map),
         Command::Scan { source, deep } => run_scan(out, &source, deep),
+        Command::Hash { source } => run_hash(out, &source),
+        Command::Survey { source } => run_survey(out, &source),
         Command::Version => {
             let v = env!("CARGO_PKG_VERSION");
             out.event(json!({"event": "version", "version": v, "contract": CONTRACT_VERSION}));

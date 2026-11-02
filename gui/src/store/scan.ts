@@ -18,6 +18,12 @@ export interface ScanState {
   /** 0..100 during a signature scan; 0 otherwise. */
   pct: number;
   result: ScanResult | null;
+  /** Every scan this session, by lower-cased source, so Home can show each drive's layout. */
+  bySource: Record<string, ScanResult>;
+  /** The last scan error per lower-cased source: a read error here often means a failing drive. */
+  errors: Record<string, string>;
+  /** Lower-cased sources the startup survey is still reading. */
+  surveying: string[];
 }
 
 export const useScan = create<ScanState>(() => ({
@@ -26,6 +32,9 @@ export const useScan = create<ScanState>(() => ({
   deviceSize: 0,
   pct: 0,
   result: null,
+  bySource: {},
+  errors: {},
+  surveying: [],
 }));
 
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();

@@ -12,6 +12,8 @@ export interface ImageArgs {
   chunkSize: number;
   skipSize: number;
   retries: number;
+  /** Only pass 2: go back over the areas a previous run could not read. */
+  retryOnly: boolean;
 }
 export interface FilesArgs { source: string; partitionLba: number; deletedOnly: boolean; map: string | null }
 export interface ExtractArgs { source: string; partitionLba: number; ids: number[]; out: string; map: string | null }
@@ -37,6 +39,9 @@ export const api = {
   stopImage: () => invoke<void>("stop_image"),
   startScan: (source: string, deep: boolean) => invoke<void>("start_scan", { source, deep }),
   stopScan: () => invoke<void>("stop_scan"),
+  startHash: (source: string) => invoke<void>("start_hash", { source }),
+  stopHash: () => invoke<void>("stop_hash"),
+  startSurvey: (sources: string[]) => invoke<void>("start_survey", { sources }),
   startFiles: (a: FilesArgs) => invoke<void>("start_files", { a }),
   stopFiles: () => invoke<void>("stop_files"),
   startExtract: (a: ExtractArgs) => invoke<void>("start_extract", { a }),

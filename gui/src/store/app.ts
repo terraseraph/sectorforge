@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CliInfo, Device, Job } from "../lib/contract";
 import { systemDriveFor } from "../lib/devices";
 
-export type Screen = "home" | "image" | "partitions" | "recover";
+export type Screen = "home" | "image" | "partitions" | "recover" | "drives" | "mapview" | "verify";
 export type LoadState = "idle" | "loading" | "loaded" | "error";
 
 export const IDLE = "Idle. Nothing is running.";
@@ -26,6 +26,8 @@ export interface AppState {
   systemConfirmed: string;
 
   devices: Device[];
+  /** Drive shown on the Drive details screen. "" = the first one. */
+  focusDrive: string;
   /** null = not known yet (drives not listed). */
   elevated: boolean | null;
   devicesState: LoadState;
@@ -44,6 +46,7 @@ export const useApp = create<AppState>(() => ({
   map: "",
   systemConfirmed: "",
   devices: [],
+  focusDrive: "",
   elevated: null,
   devicesState: "idle",
   devicesError: "",

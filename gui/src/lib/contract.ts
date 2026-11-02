@@ -22,7 +22,7 @@ export type Ev =
   | { event: "pass_start"; pass: number; name: string }
   | { event: "progress"; pass: number; current_pos: number; bytes_total: number; bytes_rescued: number; bytes_bad: number; bytes_pending: number }
   | { event: "pass_complete"; pass: number }
-  | { event: "done"; totals?: Totals; files_found?: number; bytes_written?: number; files?: number; deleted?: number; extracted?: number; failed?: number }
+  | { event: "done"; totals?: Totals; files_found?: number; bytes_written?: number; files?: number; deleted?: number; extracted?: number; failed?: number; sha256?: string }
   | { event: "error"; message: string }
   | { event: "phase"; message: string }
   | { event: "status"; size: number; current_pos: number; totals: Totals; blocks: Block[] }
@@ -34,11 +34,14 @@ export type Ev =
   | { event: "carve_progress"; bytes_scanned: number; bytes_total: number; files_found: number }
   | { event: "files_progress"; records_read: number; records_total: number }
   | { event: "extract_progress"; files_done: number; files_total: number; bytes_done: number; bytes_total: number }
+  | { event: "hash_progress"; bytes_done: number; bytes_total: number }
+  | { event: "survey_result"; source: string; size: number; table_kind: string; partitions: Partition[] }
+  | { event: "survey_error"; source: string; message: string }
   | { event: "extracted"; id: number; path: string | null; size: number; complete: boolean; note: string | null };
 
 export interface Exit { job: string; code: number | null; stderr: string }
 
-export type Job = "image" | "scan" | "carve" | "files" | "extract";
+export type Job = "image" | "scan" | "carve" | "files" | "extract" | "hash" | "survey";
 
 export interface CliInfo {
   path: string; searched: string[]; found: boolean; version: string | null; contract: number | null;

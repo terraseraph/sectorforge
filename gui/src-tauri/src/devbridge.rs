@@ -34,7 +34,7 @@ pub fn start(app: AppHandle) {
     let port = port_arg("--bridge-port", DEFAULT_PORT);
     let origin: Arc<str> = format!("http://localhost:{}", port_arg("--vite-port", DEFAULT_VITE_PORT)).into();
     let clients: Arc<Mutex<Vec<TcpStream>>> = Arc::default();
-    for name in ["sf-event", "sf-files", "sf-log", "sf-exit"] {
+    for name in ["sf-cmd", "sf-event", "sf-files", "sf-log", "sf-exit"] {
         let clients = clients.clone();
         app.listen_any(name, move |e| {
             let msg = format!("event: {name}\ndata: {}\n\n", e.payload());

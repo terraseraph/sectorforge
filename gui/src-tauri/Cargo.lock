@@ -2897,6 +2897,7 @@ dependencies = [
  "clap",
  "serde_json",
  "sf-core",
+ "sha2",
 ]
 
 [[package]]

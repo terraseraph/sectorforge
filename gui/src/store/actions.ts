@@ -9,6 +9,7 @@ import { IDLE, type Screen, systemDriveBlocked, useApp } from "./app";
 import { NO_TILES, tilesFromTotals, useImage } from "./image";
 import { NO_CARVE, NO_EXTRACT, NO_FILTER, bumpSelection, files, selection, useRecover } from "./recover";
 import { partitionsFor, useScan } from "./scan";
+import { useVerify } from "./verify";
 
 const app = useApp.getState;
 
@@ -61,8 +62,24 @@ export async function loadDevices() {
   try {
     const ev = await api.listDevices();
     useApp.setState({ devices: ev.devices, elevated: ev.elevated, devicesState: "loaded" });
+    void surveyDrives();
   } catch (e) {
     useApp.setState({ devices: [], devicesState: "error", devicesError: errorText(e) });
+  }
+}
+
+/**
+ * Quick partition-table scan of every drive, in parallel, for Home's drive tiles. A few KB per drive.
+ * Skipped without Administrator rights: it would only fail, or on Linux pop a password prompt at startup.
+ */
+async function surveyDrives() {
+  const { devices, elevated } = app();
+  if (!elevated || !devices.length || useScan.getState().surveying.length) return;
+  useScan.setState({ surveying: devices.map((d) => d.path.trim().toLowerCase()) });
+  try {
+    await api.startSurvey(devices.map((d) => d.path));
+  } catch {
+    useScan.setState({ surveying: [] });
   }
 }
 
@@ -119,7 +136,7 @@ export async function startImage() {
   if (systemDriveBlocked(app())) {
     return showError("That is your system drive. Tick the box under the Source field if you really mean to image it.");
   }
-  const { chunkKiB, skipKiB, retries } = useImage.getState();
+  const { chunkKiB, skipKiB, retries, retryOnly } = useImage.getState();
   if (!begin("image", `Starting: opening ${source.trim()}...`)) return;
   useImage.setState({ pass: "–" });
   try {
@@ -130,6 +147,7 @@ export async function startImage() {
       chunkSize: positive(chunkKiB, 1024) * 1024,
       skipSize: positive(skipKiB, 1024) * 1024,
       retries: Number.isFinite(retries) && retries >= 0 ? Math.floor(retries) : 3,
+      retryOnly,
     });
   } catch (e) {
     return rollback(e);
@@ -161,6 +179,24 @@ export async function startScan(source: string, deep: boolean) {
 }
 
 export const cancelScan = () => void api.stopScan();
+
+// ---- Verify ----
+
+export async function startHash(source: string) {
+  const src = source.trim();
+  if (!src) return showError("Choose a drive or image file to hash.");
+  if (!(await okToReadDevice(src, "hash every sector of the drive"))) return;
+  if (!begin("hash", `Opening ${src}...`)) return;
+  useVerify.setState({ hashing: src, size: 0, done: 0 });
+  try {
+    await api.startHash(src);
+  } catch (e) {
+    useVerify.setState({ hashing: "" });
+    rollback(e);
+  }
+}
+
+export const stopHash = () => void api.stopHash();
 
 // ---- Recover ----
 

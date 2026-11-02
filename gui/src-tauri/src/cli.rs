@@ -123,6 +123,8 @@ pub enum Event {
         extracted: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failed: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sha256: Option<String>,
     },
     Error { message: String },
     /// What the CLI is doing during a step with no progress numbers.
@@ -137,6 +139,9 @@ pub enum Event {
     FilesProgress { records_read: u64, records_total: u64 },
     File(FileEvent),
     ExtractProgress { files_done: u64, files_total: u64, bytes_done: u64, bytes_total: u64 },
+    HashProgress { bytes_done: u64, bytes_total: u64 },
+    SurveyResult { source: String, size: u64, table_kind: String, partitions: Vec<Partition> },
+    SurveyError { source: String, message: String },
     Extracted {
         id: u64,
         /// null when the item could not be written at all (counted in `done.failed`).
@@ -386,7 +391,7 @@ pub fn run_job(
     args: Vec<String>,
     slot: Slot,
     on_event: impl Fn(Event) + Send + 'static,
-    on_log: impl Fn(String) + Send + 'static,
+    on_log: impl Fn(String) + Send + Sync + 'static,
     on_exit: impl Fn(Exit) + Send + 'static,
 ) -> Result<(), String> {
     let mut guard = slot.lock().unwrap();
@@ -400,14 +405,27 @@ pub fn run_job(
     *guard = Some((run_id, child));
     drop(guard);
 
-    // Drain stderr to EOF (a full pipe would block the child), keeping only
-    // the tail for error reporting.
+    // Drain stderr to EOF (a full pipe would block the child), passing each line
+    // on as it arrives and keeping only the tail for error reporting.
+    let on_log = Arc::new(on_log);
+    let log_err = on_log.clone();
     let err_thread = std::thread::spawn(move || {
         let mut tail: Vec<u8> = Vec::new();
+        let mut line: Vec<u8> = Vec::new();
         let mut buf = [0u8; 4096];
         while let Ok(n) = stderr.read(&mut buf) {
             if n == 0 {
                 break;
+            }
+            for &b in &buf[..n] {
+                if b == b'\n' || b == b'\r' {
+                    if !line.is_empty() {
+                        log_err(String::from_utf8_lossy(&line).into_owned());
+                        line.clear();
+                    }
+                } else {
+                    line.push(b);
+                }
             }
             tail.extend_from_slice(&buf[..n]);
             if tail.len() > STDERR_KEEP {
@@ -487,6 +505,14 @@ mod tests {
     fn error_event() {
         let (ev, _) = parse_all("image_error.ndjson");
         assert_eq!(ev, vec![Event::Error { message: "Access is denied. (os error 5)".into() }]);
+    }
+
+    #[test]
+    fn survey_events() {
+        let ev = parse_line(r#"{"event":"survey_error","source":"X","message":"I/O device error"}"#).unwrap();
+        assert_eq!(ev, Some(Event::SurveyError { source: "X".into(), message: "I/O device error".into() }));
+        let ev = parse_line(r#"{"event":"survey_result","source":"X","size":4096,"table_kind":"none","partitions":[]}"#).unwrap();
+        assert!(matches!(ev, Some(Event::SurveyResult { size: 4096, .. })));
     }
 
     #[test]

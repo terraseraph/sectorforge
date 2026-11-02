@@ -17,6 +17,8 @@
     "@tanstack/react-virtual": "^3.14.25",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2",
+    "lucide-react": "^1.59.0",
+    "motion": "^12.43.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "zustand": "^5.0.16"

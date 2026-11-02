@@ -1,29 +1,55 @@
 import type { Job } from "../lib/contract";
 import { isDevicePath } from "../lib/format";
 import { goTo } from "../store/actions";
-import { type Screen, useApp } from "../store/app";
+import { House } from "lucide-react";
+import { motion } from "motion/react";
+import { useApp } from "../store/app";
+import { useImage } from "../store/image";
+import { ConsoleToggle } from "./Console";
+import { StatusChip } from "./StatusChip";
+import { GROUP_TONE, TOOLS, type Tool } from "./tools";
+import { openTool, useToolStatus } from "./toolStatus";
 import { useRecoverSource } from "../store/hooks";
-import { Busy, Spinner } from "./ui";
+import { Busy, cx, Spinner } from "./ui";
 
-const SCREENS: { id: Screen; label: string; sub: string }[] = [
-  { id: "home", label: "Home", sub: "What each tool does" },
-  { id: "image", label: "Image", sub: "Copy a drive to a file" },
-  { id: "partitions", label: "Partitions", sub: "Find lost volumes" },
-  { id: "recover", label: "Recover", sub: "Get files back" },
-];
+const HOME: Tool = { ...TOOLS[0]!, id: "home", screen: "home", label: "Home", icon: House, sub: "Drives and tools", job: undefined };
+const GROUPS = [...new Set(TOOLS.map((t) => t.group))];
 
 export function Nav() {
-  const screen = useApp((s) => s.screen);
   return (
     <nav aria-label="Screens">
       <h1>SectorForge</h1>
-      {SCREENS.map((s) => (
-        <button key={s.id} type="button" aria-current={screen === s.id ? "page" : undefined} onClick={() => goTo(s.id)}>
-          {s.label}
-          <small>{s.sub}</small>
-        </button>
+      <NavItem tool={HOME} />
+      {GROUPS.map((g) => (
+        <div key={g} className="nav-group">
+          <h2 className={GROUP_TONE[g]}>{g}</h2>
+          {TOOLS.filter((t) => t.group === g).map((t) => (
+            <NavItem key={t.id} tool={t} />
+          ))}
+        </div>
       ))}
     </nav>
+  );
+}
+
+function NavItem({ tool }: { tool: Tool }) {
+  const screen = useApp((s) => s.screen);
+  const retryOnly = useImage((s) => s.retryOnly);
+  const status = useToolStatus(tool);
+  // Image and Retry share a screen; the retry-only switch tells them apart.
+  const current = screen === tool.screen && (tool.screen !== "image" || (tool.id === "retry") === retryOnly);
+  return (
+    <button type="button" aria-current={current ? "page" : undefined} onClick={() => (tool.id === "home" ? goTo("home") : openTool(tool))}>
+      {current && <motion.span layoutId="nav-pill" className="nav-pill" transition={{ type: "spring", bounce: 0, visualDuration: 0.25 }} />}
+      <span className="nav-label">
+        <span className={cx("nav-icon", tool.id === "home" ? "tone-dim" : GROUP_TONE[tool.group])}>
+          <tool.icon size={16} strokeWidth={2} aria-hidden="true" />
+        </span>
+        {tool.label}
+        <StatusChip status={{ ...status, text: "" }} compact />
+      </span>
+      <small>{tool.sub}</small>
+    </button>
   );
 }
 
@@ -74,6 +100,7 @@ export function StatusBar() {
   return (
     <footer className="status" role="status" aria-live="polite">
       <span className="activity">
+        <ConsoleToggle />
         {running && <Spinner />}
         {activity}
       </span>

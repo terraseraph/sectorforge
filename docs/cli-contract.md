@@ -253,3 +253,36 @@ Windows limits command lines to ~32k characters.
   - Names are sanitized for both Windows and Linux: `\ / : * ? " < > |` and
     control characters become `_`, trailing dots/spaces become `_`, and
     reserved names (`CON`, `aux.txt`, `COM1`…) get a leading `_`.
+
+## `sf-cli hash --source S --json` (v2)
+
+SHA-256 of every byte of a device or image file, to check that an image matches
+its source (or that a copy of an image is intact).
+
+```json
+{"event":"start","source":"E:\disk.img","mode":"file","size":2000398934016,"sector_size":512}
+{"event":"phase","message":"Reading all 1.82 TiB of E:\disk.img to compute its SHA-256"}
+{"event":"hash_progress","bytes_done":4194304,"bytes_total":2000398934016}
+{"event":"done","sha256":"b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"}
+```
+
+- `hash_progress` is throttled like `progress`, plus one final event.
+- Any read error stops the run with an `error` event: a drive with unreadable
+  sectors has no single hash. Image it first and hash the image.
+
+## `sf-cli survey --source S [--source S2 ...] --json` (v2)
+
+A quick scan (partition table and each partition's first sector, no signature
+search) of several drives or images at once, one thread per source. The GUI
+runs it at startup for every attached drive. Results arrive in whatever order
+the sources finish; a slow or failing drive only delays its own line.
+
+```json
+{"event":"survey_result","source":"\\.\PhysicalDrive0","size":500107862016,"table_kind":"gpt","partitions":[...same objects as scan...]}
+{"event":"survey_error","source":"\\.\PhysicalDrive3","message":"The request could not be performed because of an I/O device error. (os error 1117)"}
+{"event":"done"}
+```
+
+- No `start` event: there is one result per source instead.
+- A source that fails is reported as `survey_error` and the run carries on;
+  the exit code is 0 unless the arguments were invalid.

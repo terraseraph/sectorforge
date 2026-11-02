@@ -18,11 +18,13 @@ struct Jobs {
     carve: Slot,
     files: Slot,
     extract: Slot,
+    hash: Slot,
+    survey: Slot,
 }
 
 impl Jobs {
-    fn all(&self) -> [&Slot; 5] {
-        [&self.image, &self.scan, &self.carve, &self.files, &self.extract]
+    fn all(&self) -> [&Slot; 7] {
+        [&self.image, &self.scan, &self.carve, &self.files, &self.extract, &self.hash, &self.survey]
     }
 }
 
@@ -52,7 +54,9 @@ fn start(app: AppHandle, slot: Slot, job: &str, args: Vec<String>, cleanup: Opti
     let (a, b, c) = (app.clone(), app.clone(), app);
     let batch = Arc::new(Mutex::new(Batch { rows: Vec::new(), last_flush: Instant::now() }));
     let (batch_ev, batch_exit) = (batch.clone(), batch);
-    let (jn, jn_exit) = (job.to_string(), job.to_string());
+    let (jn, jn_exit, jn_log) = (job.to_string(), job.to_string(), job.to_string());
+    // The exact command, for the console. Elevation (pkexec) is added later and not shown.
+    let _ = a.emit("sf-cmd", serde_json::json!({ "job": job, "args": args }));
     let flush = |app: &AppHandle, job: &str, b: &mut Batch| {
         if !b.rows.is_empty() {
             let _ = app.emit("sf-files", serde_json::json!({ "job": job, "files": std::mem::take(&mut b.rows) }));
@@ -79,8 +83,8 @@ fn start(app: AppHandle, slot: Slot, job: &str, args: Vec<String>, cleanup: Opti
                 }
             }
         },
-        move |msg| {
-            let _ = b.emit("sf-log", msg);
+        move |line| {
+            let _ = b.emit("sf-log", serde_json::json!({ "job": jn_log, "line": line }));
         },
         move |exit| {
             flush(&c, &jn_exit, &mut batch_exit.lock().unwrap());
@@ -132,6 +136,28 @@ fn start_scan(app: AppHandle, jobs: State<Jobs>, source: String, deep: bool) -> 
 #[tauri::command]
 fn stop_scan(jobs: State<Jobs>) {
     cli::stop_job(&jobs.scan);
+}
+
+#[tauri::command]
+fn start_hash(app: AppHandle, jobs: State<Jobs>, source: String) -> Result<(), String> {
+    let args = ["hash", "--source", &source, "--json"].map(String::from).into();
+    start(app, jobs.hash.clone(), "hash", args, None)
+}
+
+#[tauri::command]
+fn stop_hash(jobs: State<Jobs>) {
+    cli::stop_job(&jobs.hash);
+}
+
+/// Background quick scan of every drive at startup. Its own slot, so it never blocks a job the user starts.
+#[tauri::command]
+fn start_survey(app: AppHandle, jobs: State<Jobs>, sources: Vec<String>) -> Result<(), String> {
+    let mut args = vec!["survey".to_string()];
+    for s in sources {
+        args.extend(["--source".to_string(), s]);
+    }
+    args.push("--json".into());
+    start(app, jobs.survey.clone(), "survey", args, None)
 }
 
 #[derive(Deserialize)]
@@ -546,6 +572,9 @@ fn bridge_invoke(app: &AppHandle, cmd: &str, args: serde_json::Value) -> Result<
         "stop_image" => to(stop_image(jobs())),
         "start_scan" => to(start_scan(a, jobs(), arg(&args, "source")?, arg(&args, "deep")?)?),
         "stop_scan" => to(stop_scan(jobs())),
+        "start_hash" => to(start_hash(a, jobs(), arg(&args, "source")?)?),
+        "stop_hash" => to(stop_hash(jobs())),
+        "start_survey" => to(start_survey(a, jobs(), arg(&args, "sources")?)?),
         "start_carve" => to(start_carve(a, jobs(), arg(&args, "a")?)?),
         "stop_carve" => to(stop_carve(jobs())),
         "start_files" => to(start_files(a, jobs(), arg(&args, "a")?)?),
@@ -584,7 +613,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            start_image, stop_image, start_scan, stop_scan, get_status,
+            start_image, stop_image, start_scan, stop_scan, start_hash, stop_hash, start_survey, get_status,
             start_carve, stop_carve, start_files, stop_files, start_extract, stop_extract,
             cli_info, list_devices, list_types, startup_restore, restart_as_admin
         ])

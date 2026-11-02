@@ -21,6 +21,8 @@ export interface ImageState {
   chunkKiB: number;
   skipKiB: number;
   retries: number;
+  /** Retry bad areas only (pass 2), for a map that has already been through pass 1. */
+  retryOnly: boolean;
 }
 
 export const useImage = create<ImageState>(() => ({
@@ -28,6 +30,7 @@ export const useImage = create<ImageState>(() => ({
   hasMap: false,
   mapDone: false,
   tiles: NO_TILES,
+  retryOnly: false,
   pass: "–",
   chunkKiB: 1024,
   skipKiB: 1024,

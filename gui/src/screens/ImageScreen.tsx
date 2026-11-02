@@ -1,7 +1,7 @@
 import { DrivePicker } from "../components/DrivePicker";
 import { HealthMap } from "../components/HealthMap";
 import { ErrorAlert, JobActivity } from "../components/Shell";
-import { Button, Field, Hint, Notice, Panel, TextInput } from "../components/ui";
+import { Button, Check, Field, Hint, Notice, Panel, TextInput } from "../components/ui";
 import { dialogs } from "../lib/api";
 import { systemDriveFor } from "../lib/devices";
 import { mapChanged, pauseImage, startImage } from "../store/actions";
@@ -19,13 +19,15 @@ export function ImageScreen() {
   const hasMap = useImage((s) => s.hasMap);
   const mapDone = useImage((s) => s.mapDone);
   const resumable = hasMap && !mapDone;
+  const retryOnly = useImage((s) => s.retryOnly);
 
   return (
     <>
-      <h2>Image a drive</h2>
+      <h2>{retryOnly ? "Retry bad areas" : "Image a drive"}</h2>
       <p className="lead">
-        Copy a failing drive to a safe file first, then work on the copy. Pause any time; running the same copy again picks up where it
-        stopped.
+        {retryOnly
+          ? "Runs only the second pass: goes back over the areas the map marks as damaged or skipped and reads them sector by sector. Use the same source, destination and map as the original run."
+          : "Copy a failing drive to a safe file first, then work on the copy. Pause any time; running the same copy again picks up where it stopped."}
       </p>
       <ErrorAlert />
       <div className="cols">
@@ -67,11 +69,14 @@ export function ImageScreen() {
             </Field>
             <Hint>The map file records what has been copied. Keep it with the destination; it is what makes pause and resume work.</Hint>
 
+            <Check checked={retryOnly} onChange={(on) => useImage.setState({ retryOnly: on })}>
+              Retry bad areas only (skip the fast first pass)
+            </Check>
             <AdvancedSettings />
 
             <div className="actions">
               <Button variant="primary" disabled={!!running || blocked} onClick={() => void startImage()}>
-                {resumable ? "Resume" : "Start"}
+                {retryOnly ? "Retry bad areas" : resumable ? "Resume" : "Start"}
               </Button>
               <Button disabled={running !== "image"} onClick={pauseImage}>
                 Pause
