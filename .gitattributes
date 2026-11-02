@@ -1,0 +1,3 @@
+*.sh text eol=lf
+*.gz binary
+*.vhd binary
