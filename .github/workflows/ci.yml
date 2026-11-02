@@ -18,6 +18,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      # The released Linux CLI is a static musl build; some libc signatures differ from glibc.
+      - name: Check the static (musl) build compiles
+        if: runner.os == 'Linux'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo check -p sf-cli --target x86_64-unknown-linux-musl
       - name: Raw block device test against a loop device
         if: runner.os == 'Linux' && hashFiles('scripts/linux-loopdev-test.sh') != ''
         run: bash scripts/linux-loopdev-test.sh

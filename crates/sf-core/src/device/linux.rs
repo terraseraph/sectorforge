@@ -11,10 +11,12 @@ use std::ffi::CString;
 use std::io;
 use std::os::unix::io::RawFd;
 
-use libc::{c_ulong, close, ioctl, open, pread, O_DIRECT, O_RDONLY};
+use libc::{close, ioctl, open, pread, Ioctl, O_DIRECT, O_RDONLY};
 
-const BLKSSZGET: c_ulong = 0x1268;
-const BLKGETSIZE64: c_ulong = 0x8008_1272;
+// Request codes as plain numbers: `ioctl` takes them as `unsigned long` on glibc but `int`
+// on musl (the static build), so they are cast to `libc::Ioctl` at the call.
+const BLKSSZGET: u64 = 0x1268;
+const BLKGETSIZE64: u64 = 0x8008_1272;
 
 use crate::block_device::BlockDevice;
 
@@ -47,18 +49,18 @@ impl LinuxBlockDevice {
         Ok(dev)
     }
 
-    fn query_u64(&self, request: c_ulong) -> io::Result<u64> {
+    fn query_u64(&self, request: u64) -> io::Result<u64> {
         let mut val: u64 = 0;
-        let ret = unsafe { ioctl(self.fd, request, &mut val as *mut u64) };
+        let ret = unsafe { ioctl(self.fd, request as Ioctl, &mut val as *mut u64) };
         if ret < 0 {
             return Err(io::Error::last_os_error());
         }
         Ok(val)
     }
 
-    fn query_u32(&self, request: c_ulong) -> io::Result<u32> {
+    fn query_u32(&self, request: u64) -> io::Result<u32> {
         let mut val: u32 = 0;
-        let ret = unsafe { ioctl(self.fd, request, &mut val as *mut u32) };
+        let ret = unsafe { ioctl(self.fd, request as Ioctl, &mut val as *mut u32) };
         if ret < 0 {
             return Err(io::Error::last_os_error());
         }
