@@ -3,3 +3,4 @@
 **/*.map
 *.log
 .DS_Store
+/promo/
