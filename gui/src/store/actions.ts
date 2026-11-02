@@ -183,7 +183,7 @@ export async function startListing() {
   const source = recoverSource();
   const { lba, deletedOnlyRun, listing, listedFor } = useRecover.getState();
   if (!source) return showError("Choose a source first.");
-  if (lba === null) return showError("Choose an NTFS partition first. If the list is empty, press Scan source.");
+  if (lba === null) return showError("Choose a partition first. If the list is empty, press Scan source.");
   if (!(await okToReadDevice(source, "list files"))) return;
   if (!begin("files", `Reading the file table of ${source}...`)) return;
 

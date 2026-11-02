@@ -1,5 +1,5 @@
 //! `devices`, `carve`, `files`, `extract`: thin JSON/text wrappers over
-//! sf-core's drive listing, carver and NTFS reader.
+//! sf-core's drive listing, carver and filesystem readers.
 
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,9 @@ use anyhow::{anyhow, bail, ensure};
 use serde_json::{json, Value};
 use sf_core::carve::{self, CarveOptions, TYPES};
 use sf_core::drives;
-use sf_core::ntfs::{self, Index, Ntfs, Recoverable};
+use sf_core::ext::Ext;
+use sf_core::fat::Fat;
+use sf_core::ntfs::{self, Index, Ntfs, Recoverable, Volume};
 use sf_core::reader::{unreadable_from_map, RangeSet, SafeReader};
 use sf_core::timefmt::filetime_to_rfc3339;
 use sf_core::{BlockDevice, FsKind};
@@ -153,9 +155,13 @@ pub fn run_carve(out: Out, a: CarveArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Opens the source and checks there's NTFS at `partition_lba` (512-byte
-/// units, as `scan` reports it).
-fn open_ntfs_source(source: &str, partition_lba: u64, map: Option<&PathBuf>) -> anyhow::Result<(Box<dyn BlockDevice>, RangeSet, u64)> {
+/// Opens the source and checks there's a filesystem `files` can read at
+/// `partition_lba` (512-byte units, as `scan` reports it).
+fn open_fs_source(
+    source: &str,
+    partition_lba: u64,
+    map: Option<&PathBuf>,
+) -> anyhow::Result<(Box<dyn BlockDevice>, RangeSet, u64, FsKind)> {
     let mut dev = open_device(source)?;
     let size = dev.size_bytes();
     let part_off = partition_lba.checked_mul(512).filter(|&o| o < size).ok_or_else(|| {
@@ -168,23 +174,40 @@ fn open_ntfs_source(source: &str, partition_lba: u64, map: Option<&PathBuf>) -> 
         bail!("the boot sector at LBA {partition_lba} can't be read (bad sector, or not yet imaged)");
     }
     r.read(part_off, &mut boot);
-    match sf_core::partitions::detect_filesystem_at(&boot) {
-        FsKind::Ntfs => {}
-        FsKind::Unknown => bail!("files currently supports NTFS only (no recognizable filesystem at LBA {partition_lba})"),
-        other => bail!("files currently supports NTFS only (the partition at LBA {partition_lba} is {})", fs_name(other)),
+    let kind = sf_core::partitions::detect_filesystem_at(&boot);
+    if kind == FsKind::Unknown {
+        bail!("files supports NTFS, FAT12/16/32, exFAT and ext2/3/4 (no recognizable filesystem at LBA {partition_lba})");
     }
     drop(r);
-    Ok((dev, bad, part_off))
+    Ok((dev, bad, part_off, kind))
 }
 
-fn build_index(out: Out, ntfs: &mut Ntfs) -> Index {
+fn open_volume<'r, 'a>(out: Out, reader: &'r mut SafeReader<'a>, part_off: u64, kind: FsKind) -> anyhow::Result<Box<dyn Volume + 'r>> {
+    Ok(match kind {
+        FsKind::Ntfs => {
+            out.phase("Opening the NTFS volume and finding its file table ($MFT)");
+            Box::new(Ntfs::open(reader, part_off).map_err(|e| anyhow!(e))?)
+        }
+        FsKind::Fat12 | FsKind::Fat16 | FsKind::Fat32 | FsKind::ExFat => {
+            out.phase(format!("Opening the {} volume and reading its allocation table", fs_name(kind).to_uppercase()));
+            Box::new(Fat::open(reader, part_off).map_err(|e| anyhow!(e))?)
+        }
+        FsKind::Ext => {
+            out.phase("Opening the ext volume and reading its group descriptors");
+            Box::new(Ext::open(reader, part_off).map_err(|e| anyhow!(e))?)
+        }
+        FsKind::Unknown => unreachable!("rejected by open_fs_source"),
+    })
+}
+
+fn build_index(out: Out, vol: &mut dyn Volume) -> Index {
     let mut throttle = Throttle::new();
-    Index::build(ntfs, |done, total| {
+    vol.index(&mut |done, total| {
         if done == total || throttle.ready() {
             if out.json {
                 out.event(json!({"event": "files_progress", "records_read": done, "records_total": total}));
             } else {
-                eprint!("\rReading MFT: {done}/{total} records");
+                eprint!("\rReading the file table: {done}/{total}");
             }
         }
     })
@@ -199,15 +222,16 @@ fn recoverable_name(r: Recoverable) -> &'static str {
 }
 
 pub fn run_files(out: Out, source: &str, partition_lba: u64, deleted_only: bool, map: Option<&PathBuf>) -> anyhow::Result<()> {
-    let (mut dev, bad, part_off) = open_ntfs_source(source, partition_lba, map)?;
-    start_event(out, source, dev.as_ref(), json!({"partition_lba": partition_lba, "filesystem": "ntfs"}));
+    let (mut dev, bad, part_off, kind) = open_fs_source(source, partition_lba, map)?;
+    start_event(out, source, dev.as_ref(), json!({"partition_lba": partition_lba, "filesystem": fs_name(kind)}));
     let mut reader = SafeReader::new(dev.as_mut(), bad);
-    let mut vol = Ntfs::open(&mut reader, part_off).map_err(|e| anyhow!(e))?;
-    let index = build_index(out, &mut vol);
+    let mut vol = open_volume(out, &mut reader, part_off, kind)?;
+    let index = build_index(out, vol.as_mut());
     if !out.json {
         eprintln!();
     }
 
+    out.phase("Working out folder paths and sending the file list");
     let (mut files, mut deleted) = (0u64, 0u64);
     for id in index.ids() {
         if !index.is_listed(id) {
@@ -271,19 +295,19 @@ pub fn run_extract(out: Out, a: ExtractArgs) -> anyhow::Result<()> {
     }
     ensure!(!ids.is_empty(), "no file ids given to extract");
     guard_outputs(&a.source, &[("--out", &a.out_dir)])?;
-    let (mut dev, bad, part_off) = open_ntfs_source(&a.source, a.partition_lba, a.map.as_ref())?;
+    let (mut dev, bad, part_off, kind) = open_fs_source(&a.source, a.partition_lba, a.map.as_ref())?;
     std::fs::create_dir_all(&a.out_dir).map_err(|e| anyhow!("can't create output folder {}: {e}", a.out_dir.display()))?;
-    start_event(out, &a.source, dev.as_ref(), json!({"partition_lba": a.partition_lba, "filesystem": "ntfs"}));
+    start_event(out, &a.source, dev.as_ref(), json!({"partition_lba": a.partition_lba, "filesystem": fs_name(kind)}));
     let mut reader = SafeReader::new(dev.as_mut(), bad);
-    let mut vol = Ntfs::open(&mut reader, part_off).map_err(|e| anyhow!(e))?;
-    let index = build_index(out, &mut vol);
+    let mut vol = open_volume(out, &mut reader, part_off, kind)?;
+    let index = build_index(out, vol.as_mut());
     if !out.json {
         eprintln!();
     }
 
     let mut throttle = Throttle::new();
     let (ok, failed) = ntfs::extract(
-        &mut vol,
+        vol.as_mut(),
         &index,
         &ids,
         &a.out_dir,

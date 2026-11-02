@@ -13,15 +13,16 @@ mod tests;
 
 use std::collections::HashMap;
 
-pub use extract::{extract, ExtractProgress, Extracted};
+pub use extract::{extract, ExtractProgress, Extracted, Volume};
+pub(crate) use extract::{unreadable_note, REUSED_NOTE};
 pub use record::{record_number, ref_seq};
 pub use runlist::{decode_runlist, Run};
 pub use volume::{parse_boot, Boot, DataStream, FileEntry, Ntfs};
 
-const ROOT: u64 = 5;
+pub(crate) const ROOT: u64 = 5;
 const EXTEND: u64 = 11;
 /// Records 0–15 are NTFS's own metadata files ($MFT, $LogFile, $Bitmap…).
-const FIRST_USER_RECORD: u64 = 16;
+pub(crate) const FIRST_USER_RECORD: u64 = 16;
 const BATCH: u64 = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +102,14 @@ impl Index {
             progress(first, total);
         }
         Index { entries, records_total: total, bitmap }
+    }
+
+    /// For the other filesystems' readers, which number their entries the
+    /// NTFS way: the root is [`ROOT`], everything else from
+    /// [`FIRST_USER_RECORD`] up, `parent_ref` is the parent's id with
+    /// sequence 0.
+    pub(crate) fn from_entries(entries: HashMap<u64, IndexEntry>) -> Index {
+        Index { records_total: entries.len() as u64, entries, bitmap: Vec::new() }
     }
 
     pub fn get(&self, id: u64) -> Option<&IndexEntry> {

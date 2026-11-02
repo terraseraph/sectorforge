@@ -1,9 +1,12 @@
 import { DrivePicker } from "../components/DrivePicker";
-import { ErrorAlert } from "../components/Shell";
+import { ErrorAlert, JobActivity } from "../components/Shell";
 import { Badge, Button, Check, Field, Panel, ProgressBar, TextInput, type Tone } from "../components/ui";
+import { dialogs } from "../lib/api";
 import type { Partition } from "../lib/contract";
 import { fmtBytes } from "../lib/format";
-import { cancelScan, startScan } from "../store/actions";
+import { canBrowse } from "../lib/recoverlogic";
+import { cancelScan, goTo, startScan } from "../store/actions";
+import { useRecover } from "../store/recover";
 import { useApp } from "../store/app";
 import { type ScanResult, useScan } from "../store/scan";
 
@@ -14,6 +17,12 @@ export const CONFIDENCE: Record<string, { label: string; tone: Tone }> = {
   confident: { label: "Confident", tone: "green" },
   rebuilt: { label: "Rebuilt", tone: "amber" },
   low_confidence: { label: "Low confidence", tone: "red" },
+};
+const CONFIDENCE_NOTE: Record<string, string> = {
+  confident: "the partition table lists it and its filesystem checks out.",
+  rebuilt: "missing from the partition table; SectorForge found it by recognising a filesystem on disk. Usually real, but its size may be unknown.",
+  low_confidence:
+    "the table lists it, but its first sector is not a filesystem SectorForge recognises. Normal for Microsoft reserved and other system partitions; otherwise it may be damaged or encrypted.",
 };
 const confidenceOf = (c: string) => CONFIDENCE[c] ?? { label: c, tone: "dim" as Tone };
 
@@ -30,30 +39,72 @@ export function PartitionsScreen() {
       <h2>Find partitions</h2>
       <p className="lead">Read the partition table and, if needed, search the whole drive for filesystems. Nothing is written.</p>
       <ErrorAlert />
-      <DrivePicker selected={source} onPick={setSource} />
-      <Panel label="Scan settings">
-        <Field id="psrc" label="Source">
-          <TextInput id="psrc" value={source} placeholder="\\.\PhysicalDrive1 or an image file" onChange={(e) => setSource(e.target.value)} />
-        </Field>
-        <Check checked={deep} onChange={(on) => useScan.setState({ deep: on })}>
-          Deep scan (reads the entire drive, slow, finds partitions missing from the table)
-        </Check>
-        <div className="actions">
-          <Button variant="primary" disabled={!!running} onClick={() => void startScan(source, deep)}>
-            Scan
-          </Button>
-          <Button disabled={running !== "scan"} onClick={cancelScan}>
-            Cancel
-          </Button>
+      <div className="cols">
+        <div>
+          <DrivePicker selected={source} onPick={setSource} />
+          <Panel label="Scan settings">
+            <Field
+              id="psrc"
+              label="Source"
+              action={
+                <Button
+                  onClick={async () => {
+                    const v = await dialogs.openFile("Choose an image file");
+                    if (v !== null) setSource(v);
+                  }}
+                >
+                  Browse
+                </Button>
+              }
+            >
+              <TextInput id="psrc" value={source} placeholder="\\.\PhysicalDrive1 or an image file" onChange={(e) => setSource(e.target.value)} />
+            </Field>
+            <Check checked={deep} onChange={(on) => useScan.setState({ deep: on })}>
+              Deep scan (reads the entire drive, slow, finds partitions missing from the table)
+            </Check>
+            <div className="actions">
+              <Button variant="primary" disabled={!!running} onClick={() => void startScan(source, deep)}>
+                Scan
+              </Button>
+              <Button disabled={running !== "scan"} onClick={cancelScan}>
+                Cancel
+              </Button>
+            </div>
+            {running === "scan" && (
+              <div className="spaced">
+                <ProgressBar value={pct > 0 ? pct : null} label="Scan progress" />
+                <JobActivity job="scan" />
+              </div>
+            )}
+          </Panel>
         </div>
-        {running === "scan" && pct > 0 && (
-          <div className="spaced">
-            <ProgressBar value={pct} label="Scan progress" />
-          </div>
-        )}
-      </Panel>
-      {result && <Results result={result} />}
+        <div>{result ? <Results result={result} /> : <ScanExplainer />}</div>
+      </div>
     </>
+  );
+}
+
+function ScanExplainer() {
+  return (
+    <Panel title="What a scan tells you">
+      <ol className="steps">
+        <li>
+          <b>Quick scan.</b> Reads the partition table (MBR or GPT) at the start of the drive. Takes a second or two, even on a failing drive.
+        </li>
+        <li>
+          <b>Deep scan.</b> Also reads every sector looking for the start of a filesystem (NTFS, FAT, exFAT, ext). Use it when a partition has
+          disappeared, the table was wiped, or the drive was re-partitioned. It takes as long as reading the whole drive.
+        </li>
+        <li>
+          <b>Confidence.</b> <Badge tone="green">Confident</Badge> the table lists it and its filesystem checks out.{" "}
+          <Badge tone="amber">Rebuilt</Badge> found on disk but missing from the table. <Badge tone="red">Low confidence</Badge> the table
+          lists it, but its first sector is not a filesystem SectorForge recognises (damaged, encrypted, or unsupported).
+        </li>
+        <li>
+          <b>Next.</b> Open Recover; it offers the partitions found here for the same source.
+        </li>
+      </ol>
+    </Panel>
   );
 }
 
@@ -76,6 +127,7 @@ function Results({ result }: { result: ScanResult }) {
                 <th>Start</th>
                 <th>Size</th>
                 <th>Confidence</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -86,22 +138,33 @@ function Results({ result }: { result: ScanResult }) {
                     <td>
                       {p.filesystem.toUpperCase()} {p.label && <span className="dim">{p.label}</span>}
                     </td>
-                    <td className="m">
-                      {(p.start_lba * SECTOR).toLocaleString("en-US")} B <span className="dim">(LBA {p.start_lba})</span>
+                    <td className="m nowrap" title={`${(p.start_lba * SECTOR).toLocaleString("en-US")} bytes, LBA ${p.start_lba}`}>
+                      {fmtBytes(p.start_lba * SECTOR)}
                     </td>
-                    <td className="m">{p.size_sectors === null ? "unknown" : fmtBytes(p.size_sectors * SECTOR)}</td>
-                    <td>
+                    <td className="m nowrap">{p.size_sectors === null ? "unknown" : fmtBytes(p.size_sectors * SECTOR)}</td>
+                    <td className="nowrap">
                       <Badge tone={c.tone}>{c.label}</Badge>
+                    </td>
+                    <td className="nowrap">
+                      {canBrowse(p) && (
+                        <Button small onClick={() => recoverFrom(result.source, p.start_lba)}>
+                          Recover files
+                        </Button>
+                      )}
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
-          <p className="dim flush">
-            <b>Rebuilt</b> means the partition is missing from the drive's partition table, so SectorForge found it by recognising a
-            filesystem on disk. It is usually real, but its exact size may not be known.
-          </p>
+          <ul className="notes">
+            {[...new Set(result.partitions.map((p) => p.confidence))].map((k) => (
+              <li key={k}>
+                <b>{confidenceOf(k).label}:</b> {CONFIDENCE_NOTE[k] ?? ""}
+              </li>
+            ))}
+          </ul>
+          <p className="dim small flush">Hover a start position for the exact byte offset and LBA.</p>
         </>
       )}
     </Panel>
@@ -132,4 +195,10 @@ function DiskLayout({ partitions, total }: { partitions: Partition[]; total: num
       </div>
     </>
   );
+}
+
+/** Opens Recover on this source with the partition picked, ready to list files. */
+function recoverFrom(source: string, lba: number) {
+  useRecover.setState({ source, sourceEdited: true, lba, tab: "files" });
+  goTo("recover");
 }

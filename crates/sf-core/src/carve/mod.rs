@@ -16,7 +16,7 @@ use probe::Probe;
 use crate::reader::SafeReader;
 
 const SCAN_CHUNK: u64 = 16 * 1024 * 1024;
-const HEADER_WINDOW: u64 = 64;
+const HEADER_WINDOW: u64 = formats::HEADER_LEN as u64;
 const COPY_CHUNK: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
@@ -160,10 +160,8 @@ fn unknown_end(reader: &mut SafeReader, abs: u64, max: u64, sector: u64) -> u64 
     let mut probe = Probe::new(reader, abs, max);
     let mut rel = sector;
     while rel < max {
-        if let Some(h) = probe.get(rel, HEADER_WINDOW as usize) {
-            if formats::identify(&h).is_some() {
-                return rel;
-            }
+        if formats::identify(&probe.get_upto(rel, HEADER_WINDOW as usize)).is_some() {
+            return rel;
         }
         rel += sector;
     }

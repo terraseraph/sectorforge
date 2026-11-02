@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { VirtualList } from "../../components/VirtualList";
-import { Badge, Button, Field, Hint, Panel, ProgressBar, TextInput } from "../../components/ui";
+import { JobActivity } from "../../components/Shell";
+import { Badge, Busy, Button, Field, Hint, Panel, ProgressBar, TextInput } from "../../components/ui";
 import { dialogs } from "../../lib/api";
 import { fmtBytes, fmtCount, percent } from "../../lib/format";
 import { partitionLabel } from "../../lib/recoverlogic";
@@ -95,7 +96,7 @@ function TypePicker() {
   const chosen = useRecover((s) => s.chosen);
 
   if (typesError) return <p className="dim">Could not load the list of file types: {typesError}</p>;
-  if (!types) return <p className="dim">Loading file types...</p>;
+  if (!types) return <Busy>Loading the list of file types SectorForge can find...</Busy>;
 
   const toggle = (id: string, on: boolean) =>
     useRecover.setState((s) => ({ chosen: on ? [...s.chosen.filter((c) => c !== id), id] : s.chosen.filter((c) => c !== id) }));
@@ -123,15 +124,16 @@ function TypePicker() {
 
 function CarveProgress() {
   const c = useRecover((s) => s.carve);
-  const text =
-    c.summary || (c.state === "running" ? `Scanned ${fmtBytes(c.scanned)} of ${c.total ? fmtBytes(c.total) : "?"}. ${fmtCount(c.found)} files found so far.` : "");
-  if (!text) return null;
-  return (
-    <div className="spaced">
-      {c.state === "running" && <ProgressBar value={percent(c.scanned, c.total)} label="Carving progress" />}
-      <Hint flush>{text}</Hint>
-    </div>
-  );
+  if (c.state === "running") {
+    return (
+      <div className="spaced">
+        <ProgressBar value={c.total ? percent(c.scanned, c.total) : null} label="Carving progress" />
+        <JobActivity job="carve" />
+      </div>
+    );
+  }
+  if (!c.summary) return null;
+  return <Hint flush>{c.summary}</Hint>;
 }
 
 function CarveResults() {

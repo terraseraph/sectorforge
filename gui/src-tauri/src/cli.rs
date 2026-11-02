@@ -63,7 +63,7 @@ pub struct CarveType {
     pub description: String,
 }
 
-/// The `file` event. `files` (NTFS listing) and `carve` share the event name with
+/// The `file` event. `files` (filesystem listing) and `carve` share the event name with
 /// different fields, so everything is optional and the UI picks by job.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FileEvent {
@@ -125,6 +125,8 @@ pub enum Event {
         failed: Option<u64>,
     },
     Error { message: String },
+    /// What the CLI is doing during a step with no progress numbers.
+    Phase { message: String },
     Status { size: u64, current_pos: u64, totals: Totals, blocks: Vec<Block> },
     ScanProgress { bytes_scanned: u64, bytes_total: u64 },
     Result { table_kind: String, partitions: Vec<Partition> },
@@ -485,6 +487,12 @@ mod tests {
     fn error_event() {
         let (ev, _) = parse_all("image_error.ndjson");
         assert_eq!(ev, vec![Event::Error { message: "Access is denied. (os error 5)".into() }]);
+    }
+
+    #[test]
+    fn phase_event() {
+        let ev = parse_line(r#"{"event":"phase","message":"Reading the partition table"}"#).unwrap();
+        assert_eq!(ev, Some(Event::Phase { message: "Reading the partition table".into() }));
     }
 
     #[test]

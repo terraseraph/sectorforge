@@ -1,4 +1,5 @@
 import { CliBanner, Nav, StatusBar } from "./components/Shell";
+import { HomeScreen } from "./screens/HomeScreen";
 import { ImageScreen } from "./screens/ImageScreen";
 import { PartitionsScreen } from "./screens/PartitionsScreen";
 import { RecoverScreen } from "./screens/recover/RecoverScreen";
@@ -12,6 +13,7 @@ export function App() {
       <div className="content">
         <CliBanner />
         <main>
+          {screen === "home" && <HomeScreen />}
           {screen === "image" && <ImageScreen />}
           {screen === "partitions" && <PartitionsScreen />}
           {screen === "recover" && <RecoverScreen />}

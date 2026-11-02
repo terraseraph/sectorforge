@@ -35,12 +35,34 @@ export function Notice({ tone = "info", children }: { tone?: "info" | "warn" | "
   return <div className={cx("notice", tone !== "info" && tone)}>{children}</div>;
 }
 
-export function ProgressBar({ value, label }: { value: number; label: string }) {
+/** `value` null = the total isn't known yet, so the bar only shows that work is happening. */
+export function ProgressBar({ value, label }: { value: number | null; label: string }) {
+  if (value === null) {
+    return (
+      <div className="bar indeterminate" role="progressbar" aria-label={label}>
+        <div />
+      </div>
+    );
+  }
   const v = Math.max(0, Math.min(100, value));
   return (
     <div className="bar" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v)}>
       <div style={{ width: `${v}%` }} />
     </div>
+  );
+}
+
+export function Spinner() {
+  return <span className="spinner" aria-hidden="true" />;
+}
+
+/** Spinner plus a sentence saying exactly what is happening. */
+export function Busy({ children }: { children: ReactNode }) {
+  return (
+    <p className="busy">
+      <Spinner />
+      <span>{children}</span>
+    </p>
   );
 }
 

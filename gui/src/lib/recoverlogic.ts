@@ -19,7 +19,8 @@ export function carveRange(p: Partition | undefined): { start?: number; end?: nu
   return p.size_sectors === null ? { start } : { start, end: start + p.size_sectors * SECTOR };
 }
 
-export const isNtfs = (p: Partition) => p.filesystem === "ntfs";
+/** Filesystems `files`/`extract` can read. */
+export const canBrowse = (p: Partition) => ["ntfs", "fat12", "fat16", "fat32", "exfat", "ext"].includes(p.filesystem);
 
 export function partitionLabel(p: Partition, fmtSize: (n: number) => string): string {
   const size = p.size_sectors === null ? "size unknown" : fmtSize(p.size_sectors * SECTOR);

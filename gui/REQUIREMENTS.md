@@ -9,8 +9,7 @@ results are honest about what could not be read.
 
 - Tauri 2 shell (`src-tauri/`, Rust). Unchanged by the React rewrite. It owns
   spawning `sf-cli --json`, parsing NDJSON, elevation, and file dialogs.
-- Front end: React 19 + TypeScript (`strict`, no `any` outside the dev
-  mock), Vite, `@tanstack/react-virtual` for long lists, `zustand` for
+- Front end: React 19 + TypeScript (`strict`, no `any`), Vite, `@tanstack/react-virtual` for long lists, `zustand` for
   shared state. No CSS framework: one stylesheet of design tokens.
 - Tests: Vitest + Testing Library (jsdom).
 - Look: dark, tokens below. Plain-English copy, no emoji, no jargon without a
@@ -75,7 +74,7 @@ any job runs, and each Stop button is enabled only for its own job.
   active screen (`role="alert"`). If a job exits non-zero without an `error`
   event, show "sf-cli stopped with exit code N." plus stderr.
 - Startup order:
-  1. Install the dev mock if in dev outside Tauri.
+  1. Outside Tauri, say the app needs its own window and stop.
   2. Subscribe to events.
   3. Apply `startup_restore` (source/dest/map and screen).
   4. `cli_info`, then `list_devices`.
@@ -238,5 +237,5 @@ any job runs, and each Stop button is enabled only for its own job.
   - `aria-live` on the status bar.
 - Responsive enough for the window minimum of 900×640.
 - `npm run build` (type check + bundle), `npm test`, and the Rust `cargo
-  test` all pass. The dev mock (`?cli=missing|old`, `?elevated=1`, `?n=`)
-  works in a plain browser and is never in production bundles.
+  test` all pass. There is no mock: outside the Tauri window the page says
+  so instead of showing data.

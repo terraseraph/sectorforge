@@ -21,7 +21,11 @@ function flushFilesRedraw() {
   useRecover.setState((s) => ({ filesVersion: s.filesVersion + 1 }));
 }
 
+/** Events for a job this page didn't start (another browser tab on the dev bridge) must not land here. */
+const ours = (job: string) => useApp.getState().running === job;
+
 export function onFiles(job: Job, rows: FileRow[]) {
+  if (!ours(job)) return;
   if (job === "files") {
     files.addMany(rows);
     scheduleFilesRedraw();
@@ -32,11 +36,14 @@ export function onFiles(job: Job, rows: FileRow[]) {
 }
 
 export function onEvent(job: Job, ev: Ev) {
+  if (!ours(job)) return;
   if (ev.event === "error") {
     useApp.setState({ error: ev.message });
     return;
   }
   if (ev.event === "start") useApp.setState({ jobMode: ev.mode });
+  // A step with no numbers (opening a volume, preallocating a file): just say what it is.
+  if (ev.event === "phase") return activity(`${ev.message}...`);
 
   switch (job) {
     case "image":
@@ -99,7 +106,7 @@ function onFilesEvent(ev: Ev) {
   switch (ev.event) {
     case "files_progress":
       useRecover.setState({ recordsRead: ev.records_read, recordsTotal: ev.records_total });
-      activity(`Reading the file table: ${fmtCount(ev.records_read)} of ${fmtCount(ev.records_total)} records.`);
+      activity(`Reading the file table: ${fmtCount(ev.records_read)} of ${fmtCount(ev.records_total)}.`);
       break;
     case "done":
       useRecover.setState({
@@ -113,7 +120,7 @@ function onExtractEvent(ev: Ev) {
   switch (ev.event) {
     case "files_progress":
       // extract reads the file table first; its progress bar only follows extract_progress.
-      activity(`Reading the file table before extracting: ${fmtCount(ev.records_read)} of ${fmtCount(ev.records_total)} records.`);
+      activity(`Reading the file table before extracting: ${fmtCount(ev.records_read)} of ${fmtCount(ev.records_total)}.`);
       break;
     case "extract_progress":
       useRecover.setState((s) => ({
@@ -166,6 +173,7 @@ type Outcome = "done" | "stopped" | "error";
 const outcomeOf = (code: number | null): Outcome => (code === 0 ? "done" : code === null ? "stopped" : "error");
 
 export function onExit(x: Exit) {
+  if (!ours(x.job)) return;
   const outcome = outcomeOf(x.code);
   // A non-zero exit that never sent an `error` event (crash, usage error) still needs explaining.
   if (outcome === "error" && !useApp.getState().error) {

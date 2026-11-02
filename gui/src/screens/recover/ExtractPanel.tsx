@@ -1,4 +1,5 @@
 import { VirtualList } from "../../components/VirtualList";
+import { JobActivity } from "../../components/Shell";
 import { Badge, Hint, Panel, ProgressBar } from "../../components/ui";
 import { fmtBytes, fmtCount, percent } from "../../lib/format";
 import { type ExtractedRow, useRecover } from "../../store/recover";
@@ -12,7 +13,8 @@ export function ExtractPanel() {
 
   return (
     <Panel title="Extraction">
-      <ProgressBar value={percent(x.filesDone, x.filesTotal)} label="Extraction progress" />
+      <ProgressBar value={x.filesTotal ? percent(x.filesDone, x.filesTotal) : x.state === "running" ? null : 100} label="Extraction progress" />
+      <JobActivity job="extract" />
       <Hint flush>{progress}</Hint>
       <VirtualList short count={x.rows.length} rowHeight={30} label="Extracted files" empty="Waiting for the first file..." renderRow={(k) => <Row row={x.rows[k]!} />} />
     </Panel>

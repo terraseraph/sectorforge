@@ -366,7 +366,7 @@ impl<'r, 'a> Ntfs<'r, 'a> {
     }
 
     /// Writes the stream's bytes to `out`. Returns (written, unreadable).
-    pub fn copy_stream(&mut self, ds: &DataStream, out: &mut impl Write) -> io::Result<(u64, u64)> {
+    pub fn copy_stream(&mut self, ds: &DataStream, out: &mut (impl Write + ?Sized)) -> io::Result<(u64, u64)> {
         if let Some(r) = &ds.resident {
             out.write_all(r)?;
             return Ok((r.len() as u64, 0));

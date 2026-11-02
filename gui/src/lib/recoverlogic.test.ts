@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mapForSource, carveRange, isNtfs, partitionLabel } from "./recoverlogic";
+import { mapForSource, carveRange, canBrowse, partitionLabel } from "./recoverlogic";
 import type { Partition } from "./contract";
 
 const p = (o: Partial<Partition>): Partition => ({ start_lba: 2048, size_sectors: 1000, filesystem: "ntfs", confidence: "confident", source: "mbr", label: null, ...o });
@@ -20,9 +20,11 @@ test("carve range comes from a partition in 512-byte units, open-ended when size
   assert.deepEqual(carveRange(p({ size_sectors: null })), { start: 2048 * 512 });
 });
 
-test("ntfs check and partition label", () => {
-  assert.ok(isNtfs(p({})));
-  assert.ok(!isNtfs(p({ filesystem: "fat32" })));
+test("browsable check and partition label", () => {
+  assert.ok(canBrowse(p({})));
+  assert.ok(canBrowse(p({ filesystem: "fat32" })));
+  assert.ok(canBrowse(p({ filesystem: "ext" })));
+  assert.ok(!canBrowse(p({ filesystem: "unknown" })));
   assert.equal(partitionLabel(p({ label: "Data" }), (n) => `${n}B`), 'NTFS "Data", 512000B, starts at sector 2048');
   assert.match(partitionLabel(p({ size_sectors: null }), String), /size unknown/);
 });

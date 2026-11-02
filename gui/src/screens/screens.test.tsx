@@ -51,12 +51,14 @@ describe("Image screen", () => {
 describe("file browser", () => {
   const listing = () => {
     useRecover.setState({ listing: "done" });
+    useApp.setState({ running: "files" });
     onFiles("files", [
       { id: 5, name: "Users", path: "/Users", is_dir: true },
       { id: 6, name: '<img src=x onerror="alert(1)">.jpg', path: '/Users/<img src=x onerror="alert(1)">.jpg', deleted: true, size: 1234, recoverable: "partial" },
       { id: 7, name: "notes.txt", path: "/Users/notes.txt", size: 10 },
       { id: 8, name: "lost.doc", path: null, deleted: true, size: 5 },
     ]);
+    useApp.setState({ running: null });
     useRecover.setState((s) => ({ filesVersion: s.filesVersion + 1 }));
   };
 

@@ -19,6 +19,11 @@ the GUI exe, which runs a copy of *itself* as the child (`SectorForge.exe sf-cli
 - All byte offsets and sizes are JSON integers, in **bytes**, except fields
   explicitly named `*_lba` / `*_sectors`, which are in **512-byte units**.
 - Unknown fields must be ignored by the GUI (the CLI may add fields).
+- `{"event":"phase","message":"..."}` may appear at any point in any long
+  command. It says, in plain English, what the CLI is doing during a step
+  that has no progress numbers (opening a volume, preallocating a file). The
+  GUI shows it as the current activity; it carries no other meaning. Unknown
+  events must be ignored by the GUI too.
 - Exit code: `0` success, `1` runtime error (an `error` event was emitted
   first), `2` bad arguments (clap usage error on stderr, no JSON).
 - Stopping: the GUI pauses a run by killing the process. The CLI checkpoints
@@ -176,9 +181,11 @@ limit the byte range (e.g. one partition).
 
 ## `sf-cli files --source S --partition-lba N [--deleted-only] [--map M] --json` (v2)
 
-Lists every file and folder on an NTFS volume from its MFT, including deleted
-ones. `N` is the partition's `start_lba` from `scan` (512-byte units). Other
-filesystems: `error` "files currently supports NTFS only".
+Lists every file and folder on an NTFS, FAT12/16/32, exFAT or ext2/3/4
+volume, including deleted ones. `N` is the partition's `start_lba` from
+`scan` (512-byte units). No recognizable filesystem there: `error` "files
+supports NTFS, FAT12/16/32, exFAT and ext2/3/4 (...)". `start.filesystem`
+uses the same names as `scan` (`"ntfs"`, `"fat32"`, `"exfat"`, `"ext"`…).
 
 ```json
 {"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
@@ -188,7 +195,13 @@ filesystems: `error` "files currently supports NTFS only".
 {"event":"done","files":1200000,"deleted":4821}
 ```
 
-- `id`: MFT record number; stable handle for `extract`. Root is `5`.
+- `id`: handle for `extract`. On NTFS it's the MFT record number (stable
+  across runs). On FAT, exFAT and ext it's assigned while walking the
+  directory tree from 16 up, so it's only stable for the same, unchanged
+  source. Root is `5` everywhere, and `parent_id` is `5` for top-level
+  entries.
+- `files_progress`: on NTFS, MFT records read of the total; on FAT, exFAT
+  and ext, directories read of those found so far (the total grows).
 - `path`: full path from the volume root, `/`-separated; `null` if the
   parent chain is broken (orphaned file — the GUI groups these separately).
 - `modified` / `created`: RFC 3339 UTC, or `null`.
@@ -196,13 +209,16 @@ filesystems: `error` "files currently supports NTFS only".
   clusters are not marked in use by something else), `"partial"` (some data
   unreadable or overwritten), `"none"` (no data left, e.g. all clusters
   reused). Directories are `"full"`. NTFS-compressed or encrypted files are
-  `"partial"` (their data can't be decoded yet).
+  `"partial"` (their data can't be decoded yet). Deleted FAT files are judged
+  on one contiguous run from their first cluster (FAT erases the chain).
+  Deleted ext names whose inode no longer maps any data are `"none"`; ext
+  names whose inode is in use again (rename leftovers) aren't listed.
 - The volume root (id 5) and NTFS's own metadata files (records 0–15 such
   as `$MFT`, and everything inside `$Extend`) are not listed.
 
 ## `sf-cli extract --source S --partition-lba N (--ids 1,2,3 | --ids-file F) --out DIR [--map M] --json` (v2)
 
-Copies files out by MFT id, recreating their folder structure under `--out`
+Copies files out by id (from `files`), recreating their folder structure under `--out`
 (orphans go under `--out/_orphaned/`). Selecting a directory id extracts
 everything under it. Use `--ids-file` (one id per line) for large selections;
 Windows limits command lines to ~32k characters.
@@ -220,7 +236,7 @@ Windows limits command lines to ~32k characters.
   overwritten, or the file uses a feature not supported yet (e.g. NTFS
   compression). Whatever could be recovered is still written.
 - **(v2.1 clarifications, additive)**
-  - Before any `extract_progress`, the CLI reads the whole MFT (needed to
+  - Before any `extract_progress`, the CLI reads the whole MFT / directory tree (needed to
     resolve folders and paths) and emits the same `files_progress` events as
     `files` while it does.
   - Each selected id (and each file/folder under a selected folder) gets

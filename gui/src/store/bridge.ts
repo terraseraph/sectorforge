@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../lib/ipc";
 import type { Ev, Exit, FileRow, Job } from "../lib/contract";
 import { onEvent, onExit, onFiles } from "./events";
 

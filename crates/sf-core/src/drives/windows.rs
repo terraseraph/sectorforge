@@ -14,7 +14,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     OPEN_EXISTING,
 };
 use windows_sys::Win32::System::Ioctl::{
-    DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, IOCTL_STORAGE_QUERY_PROPERTY,
+    DISK_GEOMETRY, DISK_GEOMETRY_EX, IOCTL_DISK_GET_DRIVE_GEOMETRY, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+    IOCTL_STORAGE_QUERY_PROPERTY,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -92,7 +93,11 @@ pub fn list() -> std::io::Result<Vec<DriveInfo>> {
                 Some(u64::from_le_bytes(g[24..32].try_into().unwrap())),
                 Some(u32::from_le_bytes(g[20..24].try_into().unwrap()) as u64),
             ),
-            _ => (None, None),
+            // GEOMETRY_EX asks the drive itself, which a failing drive may not answer (error 1117).
+            // The legacy geometry is cached by Windows; its C*H*S product is a cylinder short at most.
+            _ => ioctl(&h, IOCTL_DISK_GET_DRIVE_GEOMETRY, &[], std::mem::size_of::<DISK_GEOMETRY>())
+                .and_then(|g| legacy_geometry_size(&g))
+                .map_or((None, None), |(size, sector)| (Some(size), Some(sector))),
         };
         let name = format!("PhysicalDrive{n}");
         out.push(DriveInfo {
@@ -107,6 +112,16 @@ pub fn list() -> std::io::Result<Vec<DriveInfo>> {
         });
     }
     Ok(out)
+}
+
+/// DISK_GEOMETRY: Cylinders i64 at 0, TracksPerCylinder at 12, SectorsPerTrack at 16,
+/// BytesPerSector at 20. Returns (size, sector size).
+pub(crate) fn legacy_geometry_size(g: &[u8]) -> Option<(u64, u64)> {
+    let u32_at = |o: usize| g.get(o..o + 4).map(|b| u32::from_le_bytes(b.try_into().unwrap()) as u64);
+    let cylinders = u64::from_le_bytes(g.get(0..8)?.try_into().unwrap());
+    let (tracks, sectors, bytes) = (u32_at(12)?, u32_at(16)?, u32_at(20)?);
+    let size = cylinders.checked_mul(tracks)?.checked_mul(sectors)?.checked_mul(bytes)?;
+    (size > 0).then_some((size, bytes))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -254,6 +269,19 @@ mod tests {
         d[28..32].copy_from_slice(&0x11u32.to_le_bytes());
         assert_eq!(parse_device_descriptor(&d).unwrap().model.as_deref(), Some("Cruzer"));
         assert_eq!(parse_device_descriptor(&d).unwrap().bus, "nvme");
+    }
+
+    #[test]
+    fn legacy_geometry_gives_size() {
+        // The failing 2 TB Toshiba: 243201 cylinders x 255 x 63 x 512 = Win32_DiskDrive's Size.
+        let mut g = vec![0u8; 24];
+        g[0..8].copy_from_slice(&243201u64.to_le_bytes());
+        g[12..16].copy_from_slice(&255u32.to_le_bytes());
+        g[16..20].copy_from_slice(&63u32.to_le_bytes());
+        g[20..24].copy_from_slice(&512u32.to_le_bytes());
+        assert_eq!(legacy_geometry_size(&g), Some((2000396321280, 512)));
+        assert_eq!(legacy_geometry_size(&[0u8; 24]), None);
+        assert_eq!(legacy_geometry_size(&g[..20]), None);
     }
 
     #[test]

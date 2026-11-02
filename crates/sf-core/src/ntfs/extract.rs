@@ -1,5 +1,5 @@
-//! Copying files out of an NTFS volume by MFT id, recreating folders under
-//! the output directory. Names come off a possibly damaged disk, so every
+//! Copying files out of a volume (NTFS, FAT, exFAT, ext) by index id,
+//! recreating folders under the output directory. Names come off a possibly damaged disk, so every
 //! component is sanitized, nothing existing is overwritten, and every
 //! directory is checked to still be inside `out` before writing to it.
 
@@ -31,10 +31,64 @@ pub struct ExtractProgress {
     pub bytes_total: u64,
 }
 
+/// A filesystem reader that can list itself as an [`Index`] and copy files
+/// out by the ids in it.
+pub trait Volume {
+    /// Reads every directory/record. `progress(done, total)` is called as it
+    /// goes; `total` may grow while walking a directory tree.
+    fn index(&mut self, progress: &mut dyn FnMut(u64, u64)) -> Index;
+
+    /// Writes file `id`'s data to `out`. Returns the bytes written and notes
+    /// on anything that couldn't be recovered faithfully.
+    fn copy_file(&mut self, index: &Index, id: u64, out: &mut dyn Write) -> Result<(u64, Vec<String>), String>;
+}
+
+impl Volume for Ntfs<'_, '_> {
+    fn index(&mut self, progress: &mut dyn FnMut(u64, u64)) -> Index {
+        Index::build(self, progress)
+    }
+
+    fn copy_file(&mut self, index: &Index, id: u64, out: &mut dyn Write) -> Result<(u64, Vec<String>), String> {
+        let entry = self.file(id).ok_or("its MFT record can no longer be read")?;
+        let ds = entry.data.clone().unwrap_or_default();
+        let mut notes = Vec::new();
+        if ds.compressed {
+            notes.push("This file is NTFS-compressed, which SectorForge can't decompress yet, so it was left empty.".to_string());
+            return Ok((0, notes));
+        }
+        if ds.encrypted {
+            notes.push(
+                "This file is EFS-encrypted; it can't be decrypted without the original Windows account's key, so it was left empty."
+                    .to_string(),
+            );
+            return Ok((0, notes));
+        }
+        let (_, _, reused) = self.damage(&ds, (!entry.in_use).then_some(&index.bitmap[..]));
+        let (written, unreadable) = self.copy_stream(&ds, out).map_err(|err| format!("writing failed: {err}"))?;
+        if unreadable > 0 {
+            notes.push(unreadable_note(unreadable));
+        }
+        if ds.incomplete {
+            notes.push("Part of this file's allocation record is missing or damaged.".to_string());
+        }
+        if reused > 0 {
+            notes.push(REUSED_NOTE.to_string());
+        }
+        Ok((written, notes))
+    }
+}
+
+pub(crate) fn unreadable_note(bytes: u64) -> String {
+    format!("{bytes} bytes could not be read (bad sectors, not yet imaged, or missing allocation info) and are filled with zeros.")
+}
+
+pub(crate) const REUSED_NOTE: &str =
+    "Some of this deleted file's space has since been reused by other files, so parts of it contain other data.";
+
 /// Extracts `ids` (directories recursively) into `out`, calling `on_item`
 /// once per id. Returns (extracted, failed).
 pub fn extract(
-    ntfs: &mut Ntfs,
+    vol: &mut dyn Volume,
     index: &Index,
     ids: &[u64],
     out: &Path,
@@ -54,7 +108,7 @@ pub fn extract(
     let (mut ok, mut failed) = (0, 0);
 
     for id in plan {
-        let item = match w.extract_one(ntfs, index, id) {
+        let item = match w.extract_one(vol, index, id) {
             Ok(item) => item,
             Err(e) => Extracted { id, path: None, size: 0, complete: false, note: Some(e) },
         };
@@ -87,7 +141,7 @@ fn plan(index: &Index, ids: &[u64]) -> Vec<u64> {
                 out.push(cur);
             }
             if let Some(kids) = children.get(&cur) {
-                // NTFS metadata ($MFT, $Extend…) is never pulled in implicitly.
+                // Filesystem metadata (NTFS $MFT, $Extend…) is never pulled in implicitly.
                 stack.extend(kids.iter().rev().filter(|k| index.is_listed(**k)));
             }
         }
@@ -104,7 +158,7 @@ struct Writer {
 }
 
 impl Writer {
-    fn extract_one(&mut self, ntfs: &mut Ntfs, index: &Index, id: u64) -> Result<Extracted, String> {
+    fn extract_one(&mut self, vol: &mut dyn Volume, index: &Index, id: u64) -> Result<Extracted, String> {
         let e = index.get(id).ok_or_else(|| format!("there is no file or folder with id {id} on this volume"))?;
         if e.is_dir {
             let dir = self.dir_for(index, id).map_err(|err| format!("could not create the folder: {err}"))?;
@@ -129,36 +183,9 @@ impl Writer {
             }
         }
 
-        let entry = ntfs.file(id).ok_or("its MFT record can no longer be read")?;
-        let ds = entry.data.clone().unwrap_or_default();
-        let mut notes = Vec::new();
         let mut file = BufWriter::new(File::create(&target).map_err(|err| format!("could not create the output file: {err}"))?);
         self.written.insert(target.clone());
-
-        let mut size = 0;
-        if ds.compressed {
-            notes.push("This file is NTFS-compressed, which SectorForge can't decompress yet, so it was left empty.".to_string());
-        } else if ds.encrypted {
-            notes.push(
-                "This file is EFS-encrypted; it can't be decrypted without the original Windows account's key, so it was left empty."
-                    .to_string(),
-            );
-        } else {
-            let (_, _, reused) = ntfs.damage(&ds, (!entry.in_use).then_some(&index.bitmap[..]));
-            let (written, unreadable) = ntfs.copy_stream(&ds, &mut file).map_err(|err| format!("writing failed: {err}"))?;
-            size = written;
-            if unreadable > 0 {
-                notes.push(format!(
-                    "{unreadable} bytes could not be read (bad sectors, not yet imaged, or missing allocation info) and are filled with zeros."
-                ));
-            }
-            if ds.incomplete {
-                notes.push("Part of this file's allocation record is missing or damaged.".to_string());
-            }
-            if reused > 0 {
-                notes.push("Some of this deleted file's space has since been reused by other files, so parts of it contain other data.".to_string());
-            }
-        }
+        let (size, notes) = vol.copy_file(index, id, &mut file)?;
         file.flush().map_err(|err| format!("writing failed: {err}"))?;
         Ok(Extracted {
             id,

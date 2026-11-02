@@ -1,12 +1,15 @@
+import type { Job } from "../lib/contract";
 import { isDevicePath } from "../lib/format";
 import { goTo } from "../store/actions";
 import { type Screen, useApp } from "../store/app";
 import { useRecoverSource } from "../store/hooks";
+import { Busy, Spinner } from "./ui";
 
-const SCREENS: { id: Screen; label: string }[] = [
-  { id: "image", label: "Image" },
-  { id: "partitions", label: "Partitions" },
-  { id: "recover", label: "Recover" },
+const SCREENS: { id: Screen; label: string; sub: string }[] = [
+  { id: "home", label: "Home", sub: "What each tool does" },
+  { id: "image", label: "Image", sub: "Copy a drive to a file" },
+  { id: "partitions", label: "Partitions", sub: "Find lost volumes" },
+  { id: "recover", label: "Recover", sub: "Get files back" },
 ];
 
 export function Nav() {
@@ -17,6 +20,7 @@ export function Nav() {
       {SCREENS.map((s) => (
         <button key={s.id} type="button" aria-current={screen === s.id ? "page" : undefined} onClick={() => goTo(s.id)}>
           {s.label}
+          <small>{s.sub}</small>
         </button>
       ))}
     </nav>
@@ -69,7 +73,10 @@ export function StatusBar() {
   const mode = running && jobMode ? jobMode : source ? (isDevicePath(source) ? "device" : "file") : "";
   return (
     <footer className="status" role="status" aria-live="polite">
-      <span>{activity}</span>
+      <span className="activity">
+        {running && <Spinner />}
+        {activity}
+      </span>
       <span className="mode">
         {mode ? (
           <>
@@ -91,4 +98,11 @@ export function ErrorAlert() {
       {error}
     </div>
   );
+}
+
+/** While `job` runs: a spinner and the CLI's latest word on what it is doing. */
+export function JobActivity({ job }: { job: Job }) {
+  const running = useApp((s) => s.running);
+  const activity = useApp((s) => s.activity);
+  return running === job ? <Busy>{activity}</Busy> : null;
 }

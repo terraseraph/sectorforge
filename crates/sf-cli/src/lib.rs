@@ -102,7 +102,7 @@ enum Command {
         #[arg(long)]
         list_types: bool,
     },
-    /// List files and folders (including deleted ones) on an NTFS partition.
+    /// List files and folders (including deleted ones) on an NTFS, FAT, exFAT or ext partition.
     Files {
         #[arg(long)]
         source: String,
@@ -114,7 +114,7 @@ enum Command {
         #[arg(long)]
         map: Option<PathBuf>,
     },
-    /// Copy files out of an NTFS partition by id (from `files`).
+    /// Copy files out of a partition by id (from `files`).
     Extract {
         #[arg(long)]
         source: String,
@@ -146,6 +146,15 @@ impl Out {
             let mut stdout = io::stdout().lock();
             let _ = writeln!(stdout, "{value}");
             let _ = stdout.flush();
+        }
+    }
+
+    /// What the CLI is doing right now, for steps with no progress numbers.
+    fn phase(self, text: impl AsRef<str>) {
+        if self.json {
+            self.event(json!({"event": "phase", "message": text.as_ref()}));
+        } else {
+            eprintln!("{}", text.as_ref());
         }
     }
 
@@ -377,6 +386,7 @@ fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
         "resumed": resumed,
     }));
 
+    out.phase(format!("Setting aside {} for the destination image", format_bytes(size)));
     let dest_file = OpenOptions::new().write(true).create(true).truncate(false).open(&a.dest)?;
     dest_file.set_len(size)?;
 
@@ -450,6 +460,11 @@ fn run_scan(out: Out, source: &str, deep: bool) -> anyhow::Result<()> {
         "sector_size": device.sector_size(),
     }));
 
+    out.phase(if deep {
+        format!("Reading the partition table of {source}, then searching every sector for filesystems")
+    } else {
+        format!("Reading the partition table of {source}")
+    });
     let mut throttle = Throttle::new();
     let result = partitions::scan(&mut device, deep, |done, total| {
         if done == total || throttle.ready() {

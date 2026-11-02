@@ -24,6 +24,7 @@ export type Ev =
   | { event: "pass_complete"; pass: number }
   | { event: "done"; totals?: Totals; files_found?: number; bytes_written?: number; files?: number; deleted?: number; extracted?: number; failed?: number }
   | { event: "error"; message: string }
+  | { event: "phase"; message: string }
   | { event: "status"; size: number; current_pos: number; totals: Totals; blocks: Block[] }
   | { event: "scan_progress"; bytes_scanned: number; bytes_total: number }
   | { event: "result"; table_kind: string; partitions: Partition[] }

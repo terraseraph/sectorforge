@@ -70,7 +70,7 @@ Get the latest from the **[Releases page](https://github.com/terraseraph/sectorf
    with *Deep scan* it also searches the whole image for filesystems that
    the table no longer lists (damaged or deleted partitions).
 3. **Recover.**
-   - **Files (NTFS)** lists every file and folder with its real name and
+   - **Files** (NTFS, FAT, exFAT, ext) lists every file and folder with its real name and
      path, including deleted ones, and tells you which can be fully
      recovered. Tick what you want and extract it.
    - **Carve** finds files by their contents (photos, documents, archives,
@@ -98,9 +98,20 @@ it only ever *reads* the source drive.
     and hard links stored in attribute lists.
   - Rebuilds full paths.
   - Checks whether a deleted file's space has since been reused.
+- **FAT12/16/32 and exFAT recovery:**
+  - Long file names, deleted files and deleted folders.
+  - A bad sector in the first FAT is read from the backup copy.
+  - Deleted FAT files are read as one piece from their first cluster (FAT
+    erases the map of where the pieces were); reused clusters are flagged.
+- **ext2/3/4 recovery:**
+  - Live files through extent trees or ext2 block maps.
+  - Deleted names left in directory slack; recoverable only when the freed
+    inode still says where the data is (ext3/ext4 usually erase that).
 - **Carving:**
-  - Formats: JPEG, PNG, GIF, PDF, ZIP (recognising docx/xlsx/pptx), MP4/MOV,
-    SQLite, 7z and RAR.
+  - About 95 file types (`sf-cli carve --list-types`): photos and camera raws
+    (JPEG, PNG, HEIC, TIFF, CR2/CR3, NEF, ARW, DNG…), documents (PDF, Office
+    old and new, OpenDocument, RTF, EPUB…), audio, video, archives,
+    executables, fonts, mail stores (PST/OST), registry hives and event logs.
   - Each file's end is found from its own structure rather than guessed.
 - **Honest results:**
   - Pass the imaging map to recovery, and any file overlapping a sector that
@@ -123,7 +134,7 @@ sf-cli status --map E:\rescue\disk.map           # progress at any time
 
 sf-cli scan --source E:\rescue\disk.img          # partitions (add --deep to hunt for lost ones)
 
-# NTFS: list files incl. deleted (partition start LBA comes from scan), then extract by id
+# NTFS/FAT/exFAT/ext: list files incl. deleted (partition start LBA comes from scan), then extract by id
 sf-cli files   --source E:\rescue\disk.img --partition-lba 2048 --map E:\rescue\disk.map
 sf-cli extract --source E:\rescue\disk.img --partition-lba 2048 --ids 4211,5120 --out F:\recovered
 
@@ -148,8 +159,13 @@ But:
   against loop devices, not real disks.
 - NTFS-compressed and encrypted files are listed and flagged, but not
   decoded yet.
-- File browsing and extraction support NTFS only. FAT, exFAT and ext volumes
-  are detected but can only be recovered by carving.
+- Deleted files on FAT are assumed to be stored in one piece; a fragmented
+  deleted file comes back with other data in its later parts. On ext3/ext4,
+  deleted files usually can't be located by the filesystem at all: carve
+  instead.
+- FAT timestamps are local time with no zone; they're shown as if UTC.
+- ext: symlinks, devices and inline data larger than 60 bytes aren't
+  recovered; fscrypt-encrypted files are copied still encrypted.
 - Carving doesn't reassemble fragmented files.
 - If a deleted file's space was reused, what's recovered is whatever is
   there now (it's flagged, not hidden).
@@ -186,7 +202,7 @@ when a `v*` tag is pushed. The steps are documented in [`gui/README.md`](gui/REA
 - `crates/sf-core`: the engine.
   - Raw device access, the resumable mapfile and the imaging algorithm.
   - Partition detection, drive listing and the same-drive check.
-  - NTFS reader and carving.
+  - NTFS, FAT/exFAT and ext readers, and carving.
 - `crates/sf-cli`: the command-line tool, a thin layer over the engine.
 - `gui/`: Tauri 2 desktop app. It runs `sf-cli --json` as a separate process
   and never links the engine, so only `sf-cli` needs elevated rights.

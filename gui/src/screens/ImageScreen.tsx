@@ -1,6 +1,6 @@
 import { DrivePicker } from "../components/DrivePicker";
 import { HealthMap } from "../components/HealthMap";
-import { ErrorAlert } from "../components/Shell";
+import { ErrorAlert, JobActivity } from "../components/Shell";
 import { Button, Field, Hint, Notice, Panel, TextInput } from "../components/ui";
 import { dialogs } from "../lib/api";
 import { systemDriveFor } from "../lib/devices";
@@ -28,58 +28,78 @@ export function ImageScreen() {
         stopped.
       </p>
       <ErrorAlert />
-      <DrivePicker selected={source} onPick={(path) => setApp({ source: path })} />
+      <div className="cols">
+        <div>
+          <DrivePicker selected={source} onPick={(path) => setApp({ source: path })} />
 
-      <Panel label="Image settings">
-        <Field
-          id="src"
-          label="Source"
-          action={<Button onClick={async () => pick(await dialogs.openFile("Choose a source image file"), "source")}>Browse</Button>}
-        >
-          <TextInput id="src" value={source} placeholder="\\.\PhysicalDrive1 or C:\path\disk.img" onChange={(e) => setApp({ source: e.target.value })} />
-        </Field>
-        <Hint>
-          <code>\\.\PhysicalDrive1</code> = direct hardware access (needs Administrator). Any other path = image file.
-        </Hint>
-        <SystemDriveGuard />
-
-        <Field id="dst" label="Destination" action={<Button onClick={async () => pick(await dialogs.saveFile("Destination image file"), "dest")}>Choose</Button>}>
-          <TextInput id="dst" value={dest} onChange={(e) => setApp({ dest: e.target.value })} />
-        </Field>
-        <Hint>Save the image on a different drive from the one you are rescuing. SectorForge refuses to write onto the source drive.</Hint>
-
-        <Field
-          id="map"
-          label="Map file"
-          action={
-            <Button
-              onClick={async () => {
-                if (pick(await dialogs.saveFile("Map file", map || undefined), "map")) mapChanged();
-              }}
+          <Panel label="Image settings">
+            <Field
+              id="src"
+              label="Source"
+              action={<Button onClick={async () => pick(await dialogs.openFile("Choose a source image file"), "source")}>Browse</Button>}
             >
-              Choose
-            </Button>
-          }
-        >
-          <TextInput id="map" value={map} onChange={(e) => setApp({ map: e.target.value })} onBlur={mapChanged} />
-        </Field>
-        <Hint>The map file records what has been copied. Keep it with the destination; it is what makes pause and resume work.</Hint>
+              <TextInput id="src" value={source} placeholder="\\.\PhysicalDrive1 or C:\path\disk.img" onChange={(e) => setApp({ source: e.target.value })} />
+            </Field>
+            <Hint>
+              <code>\\.\PhysicalDrive1</code> = direct hardware access (needs Administrator). Any other path = image file.
+            </Hint>
+            <SystemDriveGuard />
 
-        <AdvancedSettings />
+            <Field id="dst" label="Destination" action={<Button onClick={async () => pick(await dialogs.saveFile("Destination image file"), "dest")}>Choose</Button>}>
+              <TextInput id="dst" value={dest} onChange={(e) => setApp({ dest: e.target.value })} />
+            </Field>
+            <Hint>Save the image on a different drive from the one you are rescuing. SectorForge refuses to write onto the source drive.</Hint>
 
-        <div className="actions">
-          <Button variant="primary" disabled={!!running || blocked} onClick={() => void startImage()}>
-            {resumable ? "Resume" : "Start"}
-          </Button>
-          <Button disabled={running !== "image"} onClick={pauseImage}>
-            Pause
-          </Button>
-          {resumable && !running && <span className="dim">This map is part done; Resume carries on where it stopped.</span>}
+            <Field
+              id="map"
+              label="Map file"
+              action={
+                <Button
+                  onClick={async () => {
+                    if (pick(await dialogs.saveFile("Map file", map || undefined), "map")) mapChanged();
+                  }}
+                >
+                  Choose
+                </Button>
+              }
+            >
+              <TextInput id="map" value={map} onChange={(e) => setApp({ map: e.target.value })} onBlur={mapChanged} />
+            </Field>
+            <Hint>The map file records what has been copied. Keep it with the destination; it is what makes pause and resume work.</Hint>
+
+            <AdvancedSettings />
+
+            <div className="actions">
+              <Button variant="primary" disabled={!!running || blocked} onClick={() => void startImage()}>
+                {resumable ? "Resume" : "Start"}
+              </Button>
+              <Button disabled={running !== "image"} onClick={pauseImage}>
+                Pause
+              </Button>
+              {resumable && !running && <span className="dim">This map is part done; Resume carries on where it stopped.</span>}
+            </div>
+            <JobActivity job="image" />
+          </Panel>
         </div>
-      </Panel>
-
-      <Tiles />
-      <HealthMap />
+        <div>
+          <Tiles />
+          <HealthMap />
+          <Panel title="What happens when you press Start">
+            <ol className="steps">
+              <li>
+                <b>Pass 1, fast copy.</b> Reads big chunks and jumps past anything slow or unreadable, so the healthy majority is safe first.
+              </li>
+              <li>
+                <b>Pass 2, retry.</b> Goes back to the skipped areas and reads them sector by sector, up to the retry limit.
+              </li>
+              <li>
+                <b>Done.</b> Anything still unreadable stays marked bad in the map. The image is still usable; Recover flags files that touch
+                those areas.
+              </li>
+            </ol>
+          </Panel>
+        </div>
+      </div>
     </>
   );
 }

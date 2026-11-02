@@ -7,6 +7,10 @@ fn main() -> std::process::ExitCode {
     if std::env::args_os().nth(1).is_some_and(|a| a == sectorforge_gui_lib::EMBEDDED_ARG) {
         return sf_cli::run(std::iter::once(std::ffi::OsString::from("sf-cli")).chain(std::env::args_os().skip(2)));
     }
+    #[cfg(windows)]
+    if let Some(code) = sectorforge_gui_lib::relaunch_elevated() {
+        return code;
+    }
     sectorforge_gui_lib::run();
     std::process::ExitCode::SUCCESS
 }

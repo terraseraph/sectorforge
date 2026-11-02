@@ -1,7 +1,7 @@
 // Typed wrappers for the Tauri commands in src-tauri/src/lib.rs.
-import { invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import type { CliInfo, Ev, Restore } from "./contract";
+import { inTauri, invoke } from "./ipc";
 
 export type EvOf<K extends Ev["event"]> = Extract<Ev, { event: K }>;
 
@@ -54,13 +54,15 @@ export function errorText(e: unknown): string {
 
 const single = (v: string | string[] | null) => (typeof v === "string" ? v : null);
 
+// A browser tab can't open the native pickers, so it asks for the path as text.
 export const dialogs = {
-  openFile: async (title: string) => single(await open({ title })),
-  openFolder: async (title: string) => single(await open({ title, directory: true })),
-  saveFile: async (title: string, defaultPath?: string) => single(await save({ title, defaultPath })),
-  confirmReadDrive: (what: string) =>
-    ask(
-      `You are about to ${what} by reading the live drive directly. That is fine for a healthy drive, but reading a failing drive repeatedly can make it worse.\n\nIf the drive is failing, image it first (Image screen) and recover from the image.`,
-      { title: "Read the drive directly?", kind: "warning", okLabel: "Read the drive", cancelLabel: "Cancel" },
-    ),
+  openFile: async (title: string) => (inTauri ? single(await open({ title })) : prompt(title)),
+  openFolder: async (title: string) => (inTauri ? single(await open({ title, directory: true })) : prompt(title)),
+  saveFile: async (title: string, defaultPath?: string) => (inTauri ? single(await save({ title, defaultPath })) : prompt(title, defaultPath)),
+  confirmReadDrive: async (what: string) => {
+    const msg = `You are about to ${what} by reading the live drive directly. That is fine for a healthy drive, but reading a failing drive repeatedly can make it worse.
+
+If the drive is failing, image it first (Image screen) and recover from the image.`;
+    return inTauri ? ask(msg, { title: "Read the drive directly?", kind: "warning", okLabel: "Read the drive", cancelLabel: "Cancel" }) : confirm(msg);
+  },
 };

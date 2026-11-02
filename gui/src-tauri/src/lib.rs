@@ -1,4 +1,6 @@
 mod cli;
+#[cfg(debug_assertions)]
+mod devbridge;
 
 pub use cli::EMBEDDED_ARG;
 
@@ -439,13 +441,128 @@ fn restart_as_admin(app: AppHandle, jobs: State<Jobs>, restore: Restore) -> Resu
     Ok(())
 }
 
+/// Debug builds: run the backend with no window, for the UI in a browser tab (`npm run dev`).
+const HEADLESS_ARG: &str = "--headless";
+/// Added by `relaunch_elevated`: the PID of the unelevated copy waiting for us.
+const PARENT_ARG: &str = "--parent-pid";
+
+/// Exit when the process that started us exits.
+#[cfg(windows)]
+fn exit_with_parent(pid: u32) {
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE};
+    // SAFETY: plain handle calls; a null handle (parent already gone) is checked first.
+    let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+    if h.is_null() {
+        std::process::exit(0);
+    }
+    let h = h as usize; // HANDLE isn't Send; it stays valid until we exit.
+    std::thread::spawn(move || {
+        unsafe { WaitForSingleObject(h as _, INFINITE) };
+        std::process::exit(0);
+    });
+}
+
+/// Windows: reading drives needs Administrator, so an unelevated start asks once (UAC),
+/// waits for the elevated copy and returns its exit code. `None` = already elevated.
+/// Not a requireAdministrator manifest: that makes `cargo run` / `tauri dev` fail with
+/// error 740 instead of prompting.
+#[cfg(windows)]
+pub fn relaunch_elevated() -> Option<std::process::ExitCode> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE};
+    use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, SW_HIDE, SW_SHOWNORMAL};
+
+    if sf_core::drives::is_elevated() {
+        return None;
+    }
+    let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let fail = |msg: String| {
+        let (text, title) = (wide(msg.as_ref()), wide("SectorForge".as_ref()));
+        // SAFETY: NUL-terminated buffers that outlive the call.
+        unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_ICONERROR) };
+        Some(std::process::ExitCode::FAILURE)
+    };
+    let Ok(exe) = std::env::current_exe() else { return fail("Could not find SectorForge's own program file.".into()) };
+    let mut params = std::env::args().skip(1).map(|a| quote_arg(&a)).collect::<Vec<_>>();
+    // The elevated copy outlives us otherwise (Ctrl+C, `tauri dev` rebuilds): it exits when we do.
+    params.extend([PARENT_ARG.to_string(), std::process::id().to_string()]);
+    let params = params.join(" ");
+    let (verb, file, params) = (wide("runas".as_ref()), wide(exe.as_os_str()), wide(params.as_ref()));
+    // SAFETY: zeroed SHELLEXECUTEINFOW is valid; every pointer set is a live NUL-terminated buffer.
+    let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = file.as_ptr();
+    info.lpParameters = params.as_ptr();
+    // Headless has no window of its own; don't open a console for it either.
+    info.nShow = if std::env::args().any(|a| a == HEADLESS_ARG) { SW_HIDE } else { SW_SHOWNORMAL };
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        // 1223 = ERROR_CANCELLED: the user said No to the prompt.
+        return match unsafe { GetLastError() } {
+            1223 => fail("SectorForge needs Administrator rights to read drives. Start it again and choose Yes.".into()),
+            e => fail(format!("Could not start SectorForge as Administrator (Windows error {e}).")),
+        };
+    }
+    let mut code = 1u32;
+    // SAFETY: hProcess is a valid handle because SEE_MASK_NOCLOSEPROCESS was set and the call succeeded.
+    unsafe {
+        WaitForSingleObject(info.hProcess, INFINITE);
+        GetExitCodeProcess(info.hProcess, &mut code);
+        CloseHandle(info.hProcess);
+    }
+    Some(std::process::ExitCode::from(code as u8))
+}
+
 #[cfg(not(windows))]
 #[tauri::command]
 fn restart_as_admin(_restore: Restore) -> Result<(), String> {
     Err("Restarting as Administrator is only available on Windows. On Linux, SectorForge asks for your password (pkexec) when a job needs it.".into())
 }
 
+/// The dev bridge's way into the same commands the window invokes (keep in step with
+/// `generate_handler!` below).
+#[cfg(debug_assertions)]
+fn bridge_invoke(app: &AppHandle, cmd: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    use tauri::async_runtime::block_on;
+    use tauri::Manager;
+    fn arg<T: serde::de::DeserializeOwned>(args: &serde_json::Value, k: &str) -> Result<T, String> {
+        serde_json::from_value(args.get(k).cloned().unwrap_or_default()).map_err(|e| format!("Bad `{k}` argument: {e}"))
+    }
+    fn to<T: Serialize>(v: T) -> serde_json::Value {
+        serde_json::to_value(v).unwrap_or_default()
+    }
+    let jobs = || app.state::<Jobs>();
+    let a = app.clone();
+    Ok(match cmd {
+        "cli_info" => to(block_on(cli_info())),
+        "list_devices" => to(block_on(list_devices())?),
+        "list_types" => to(block_on(list_types())?),
+        "get_status" => to(block_on(get_status(arg(&args, "map")?))?),
+        "startup_restore" => to(startup_restore()),
+        "start_image" => to(start_image(a, jobs(), arg(&args, "a")?)?),
+        "stop_image" => to(stop_image(jobs())),
+        "start_scan" => to(start_scan(a, jobs(), arg(&args, "source")?, arg(&args, "deep")?)?),
+        "stop_scan" => to(stop_scan(jobs())),
+        "start_carve" => to(start_carve(a, jobs(), arg(&args, "a")?)?),
+        "stop_carve" => to(stop_carve(jobs())),
+        "start_files" => to(start_files(a, jobs(), arg(&args, "a")?)?),
+        "stop_files" => to(stop_files(jobs())),
+        "start_extract" => to(start_extract(a, jobs(), arg(&args, "a")?)?),
+        "stop_extract" => to(stop_extract(jobs())),
+        _ => return Err(format!("`{cmd}` is not available from a browser tab.")),
+    })
+}
+
 pub fn run() {
+    let args: Vec<String> = std::env::args().collect();
+    #[cfg(windows)]
+    if let Some(pid) = args.windows(2).find(|w| w[0] == PARENT_ARG).and_then(|w| w[1].parse().ok()) {
+        exit_with_parent(pid);
+    }
+    let headless = cfg!(debug_assertions) && args.iter().any(|a| a == HEADLESS_ARG);
     // An elevated and a normal process must not share one WebView2 profile folder.
     #[cfg(windows)]
     if std::env::args().any(|a| a == "--elevated") {
@@ -457,6 +574,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Jobs::default())
+        .setup(move |app| {
+            #[cfg(debug_assertions)]
+            devbridge::start(app.handle().clone());
+            // The window is `"create": false` in tauri.conf.json so headless can skip it.
+            if !headless {
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &app.config().app.windows[0])?.build()?;
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             start_image, stop_image, start_scan, stop_scan, get_status,
             start_carve, stop_carve, start_files, stop_files, start_extract, stop_extract,

@@ -1,8 +1,9 @@
 import { useEffect } from "react";
+import { JobActivity } from "../../components/Shell";
 import { Button, Check, Field, Hint, Panel, ProgressBar, TextInput } from "../../components/ui";
 import { dialogs } from "../../lib/api";
 import { fmtBytes, fmtCount, percent } from "../../lib/format";
-import { isNtfs, partitionLabel } from "../../lib/recoverlogic";
+import { canBrowse, partitionLabel } from "../../lib/recoverlogic";
 import { startExtract, startListing, startScan, stopExtract, stopListing } from "../../store/actions";
 import { useApp } from "../../store/app";
 import { files, selection, useRecover } from "../../store/recover";
@@ -18,16 +19,22 @@ export function FilesTab({ source }: { source: string }) {
   const listing = useRecover((s) => s.listing);
   const parts = partitionsFor(result, source);
 
-  // Keep a valid NTFS partition selected as scan results come and go.
+  // Keep a browsable partition selected as scan results come and go.
   useEffect(() => {
     if (parts && (lba === null || !parts.some((p) => p.start_lba === lba))) {
-      useRecover.setState({ lba: parts.find(isNtfs)?.start_lba ?? null });
+      useRecover.setState({ lba: parts.find(canBrowse)?.start_lba ?? null });
     }
   }, [parts, lba]);
 
   return (
     <>
       <Panel label="Partition to list">
+        <p className="lead flush">
+          Reads the volume's file table (NTFS, FAT, exFAT or ext) and lists every file and folder it still describes, including deleted ones,
+          with their names, folders and dates. Press <b>Scan source</b> to find the partitions, pick one, then <b>List files</b>. Tick what
+          you want and extract it to another drive. FAT keeps no map of a deleted file's pieces, so deleted FAT files are read as one piece,
+          and ext3/ext4 usually wipe where a deleted file was: for those, carving often does better.
+        </p>
         <Field
           id="part"
           label="Partition"
@@ -44,9 +51,9 @@ export function FilesTab({ source }: { source: string }) {
           >
             {parts && parts.length ? (
               parts.map((p) => (
-                <option key={p.start_lba} value={p.start_lba} disabled={!isNtfs(p)}>
+                <option key={p.start_lba} value={p.start_lba} disabled={!canBrowse(p)}>
                   {partitionLabel(p, fmtBytes)}
-                  {isNtfs(p) ? "" : " (file browsing supports NTFS only)"}
+                  {canBrowse(p) ? "" : " (no readable filesystem: use carving)"}
                 </option>
               ))
             ) : (
@@ -87,10 +94,17 @@ function ListingProgress() {
   useRecover((s) => s.filesVersion);
   const n = fmtCount(files.count);
 
+  if (listing === "running") {
+    return (
+      <div className="spaced">
+        <ProgressBar value={total ? percent(read, total) : null} label="File table progress" />
+        <JobActivity job="files" />
+        {files.count > 0 && <Hint flush>{n} files and folders listed so far.</Hint>}
+      </div>
+    );
+  }
   const text =
-    listing === "running"
-      ? `Reading the file table: ${fmtCount(read)} of ${total ? fmtCount(total) : "?"} records. ${n} files and folders so far.`
-      : listing === "done"
+    listing === "done"
         ? doneInfo
         : listing === "stopped"
           ? `Stopped early. ${n} entries were read, so the list is incomplete.`
@@ -100,7 +114,6 @@ function ListingProgress() {
   if (!text) return null;
   return (
     <div className="spaced">
-      {listing === "running" && <ProgressBar value={percent(read, total)} label="File table progress" />}
       <Hint flush>{text}</Hint>
     </div>
   );

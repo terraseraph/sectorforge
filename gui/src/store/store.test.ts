@@ -94,7 +94,9 @@ describe("starting jobs", () => {
 
   test("extract uses the source and partition that were listed, not the current fields", async () => {
     useRecover.setState({ listedFor: { source: "E:\\a.img", lba: 2048 }, source: "E:\\other.img", sourceEdited: true, lba: 999, out: "F:\\rec" });
+    useApp.setState({ running: "files" });
     onFiles("files", [{ id: 42, name: "a.txt", path: "/a.txt", size: 3 }]);
+    useApp.setState({ running: null });
     selection.add(0);
     await startExtract();
     expect(api.startExtract).toHaveBeenCalledWith(expect.objectContaining({ source: "E:\\a.img", partitionLba: 2048, ids: [42] }));
@@ -102,6 +104,12 @@ describe("starting jobs", () => {
 });
 
 describe("events", () => {
+  test("a phase event becomes the activity line", () => {
+    useApp.setState({ running: "files" });
+    onEvent("files", { event: "phase", message: "Opening the NTFS volume" });
+    expect(useApp.getState().activity).toBe("Opening the NTFS volume...");
+  });
+
   test("image progress fills the tiles, and a stopped exit reads as paused", () => {
     useApp.setState({ running: "image" });
     onEvent("image", { event: "progress", pass: 1, current_pos: 0, bytes_total: 1000, bytes_rescued: 250, bytes_bad: 0, bytes_pending: 750 });
@@ -117,12 +125,21 @@ describe("events", () => {
   });
 
   test("an error event wins over the generic exit message", () => {
+    useApp.setState({ running: "scan" });
     onEvent("scan", { event: "error", message: "cannot open source X" });
     onExit({ job: "scan", code: 1, stderr: "" });
     expect(useApp.getState().error).toBe("cannot open source X");
   });
 
+  test("events for a job this page did not start are ignored", () => {
+    onEvent("scan", { event: "result", table_kind: "gpt", partitions: [] });
+    onExit({ job: "scan", code: 0, stderr: "" });
+    expect(useScan.getState().result).toBeNull();
+    expect(useApp.getState().activity).toBe(IDLE);
+  });
+
   test("the scan result remembers which source it belongs to", () => {
+    useApp.setState({ running: "scan" });
     useScan.setState({ scanning: "E:\\disk.img" });
     onEvent("scan", { event: "start", source: "E:\\disk.img", mode: "file", size: 4096, sector_size: 512, resumed: false });
     onEvent("scan", { event: "result", table_kind: "mbr", partitions: [] });
@@ -131,6 +148,7 @@ describe("events", () => {
   });
 
   test("extract items that could not be written count as failed, not incomplete", () => {
+    useApp.setState({ running: "extract" });
     useRecover.setState({ out: "F:\\rec" });
     onEvent("extract", { event: "extracted", id: 1, path: "a.txt", size: 3, complete: true, note: null });
     onEvent("extract", { event: "extracted", id: 2, path: "b.txt", size: 3, complete: false, note: "part unreadable" });
@@ -140,6 +158,7 @@ describe("events", () => {
   });
 
   test("file batches land in the store and redraw once listing ends", () => {
+    useApp.setState({ running: "files" });
     const before = useRecover.getState().filesVersion;
     onFiles("files", [
       { id: 5, name: "Users", path: "/Users", is_dir: true },

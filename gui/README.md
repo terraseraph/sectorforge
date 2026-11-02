@@ -10,11 +10,11 @@ Screens: **Image** (drive picker, live health map), **Partitions** (drive picker
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
 cargo build -p sf-cli          # in the repo root; produces target\debug\sf-cli.exe
 cd gui; npm install
-npm run tauri dev              # real app
-npm run dev                    # UI only, in a browser: a mock stands in for Rust (src/devmock.ts)
+npm run dev                    # real backend, no window; opens http://localhost:1420 in your browser
+npm run dev:window             # the same app in its own window
 ```
 
-`npm run dev` in a plain browser is for checking layout. Add `?n=5000000` to try a huge listing, `?cli=missing` or `?cli=old` to see the sf-cli banner, `?elevated=1` to hide the Administrator prompt.
+Both pick free ports (Vite from 1420, the bridge from 1430), skip ports other programs hold, and stop with a message if SectorForge is already running. Both ask for Administrator (UAC) once when the backend starts. In a browser tab, debug builds serve the Tauri commands and events on 127.0.0.1:1430 (`src-tauri/src/devbridge.rs`), so the data is real; file pickers become text prompts. Release builds (`npm run tauri build`) are the single .exe with neither.
 
 Reading a physical drive needs elevated rights. On Windows the picker offers **Restart as Administrator** (relaunches the exe with the `runas` verb and keeps the source, destination and map). On Linux device-mode jobs run through `pkexec` when the user is not root or in the `disk` group. Inside an AppImage, sf-cli is first copied to `$XDG_RUNTIME_DIR/sectorforge/` (or a private `/tmp` dir, mode 0700) because root usually cannot read the AppImage mount. **Linux device mode (pkexec, the copy, Stop) has never been exercised for real.**
 
@@ -71,12 +71,11 @@ npm run tauri -- build --bundles appimage  # gui/src-tauri/target/release/bundle
 
 - `src-tauri/src/cli.rs` - typed `Event` enum (all v2 events), line parser, sf-cli lookup, pkexec wrapping, process spawn/kill, unit tests
 - `src-tauri/src/lib.rs` - Tauri commands (`start_*`/`stop_*` for image, scan, carve, files, extract; `cli_info`, `list_devices`, `list_types`, `restart_as_admin`, `startup_restore`); `file` events are batched (2000 or 80 ms) into `sf-files`; other events go as `sf-event`; process end as `sf-exit`
-- `src/main.tsx` - boot: dev mock (browser only), event bridge, settings restored after elevation, first render
+- `src/main.tsx` - boot: refuses to run outside the Tauri window, event bridge, settings restored after elevation, first render
 - `src/lib/` - framework-free logic: `api.ts` (typed Tauri commands and dialogs), `contract.ts` (event types), `filestore.ts` (column store for million-entry listings), `map.ts` (blocks to health-map cells), `devices.ts`, `recoverlogic.ts`, `format.ts`
 - `src/store/` - zustand stores (`app`, `image`, `scan`, `recover`), `actions.ts` (everything the UI can do; sets "running" before invoking, rolls back on rejection), `events.ts` (sf-cli events to state), `bridge.ts` (event subscriptions, started once outside React)
 - `src/components/` - shell (nav, sf-cli banner, status bar, error alert), `DrivePicker`, `HealthMap`, `VirtualList` (TanStack Virtual), `ui.tsx` primitives
 - `src/screens/` - `ImageScreen`, `PartitionsScreen`, `recover/` (`RecoverScreen`, `FilesTab`, `FileBrowser`, `ExtractPanel`, `CarveTab`)
-- `src/dev/devmock.ts` - browser-only stand-in for the Rust side (dev builds only; `?cli=missing|old`, `?elevated=1`, `?n=<files>`)
 - `fixtures/*.ndjson` - sample CLI output; `v2_*` are hand-written from the contract (regenerate with `node scripts/gen-v2-fixtures.mjs`), `real_*` come from the actual sf-cli. Files in `../docs/contract-samples/` are parsed by the Rust tests too.
 
 ## Tests

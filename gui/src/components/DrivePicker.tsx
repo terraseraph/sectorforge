@@ -3,7 +3,7 @@ import { busLabel, deviceTitle, findDevice } from "../lib/devices";
 import { fmtBytes, isDevicePath } from "../lib/format";
 import { loadDevices, restartAsAdmin } from "../store/actions";
 import { useApp } from "../store/app";
-import { Badge, Button, Notice, Panel } from "./ui";
+import { Badge, Busy, Button, Notice, Panel } from "./ui";
 
 /** Drives from `sf-cli devices`; picking one sets `selected` via `onPick`. */
 export function DrivePicker({ selected, onPick }: { selected: string; onPick: (path: string) => void }) {
@@ -13,7 +13,7 @@ export function DrivePicker({ selected, onPick }: { selected: string; onPick: (p
   const current = findDevice(devices, selected)?.path;
 
   let body;
-  if (state === "loading" && !devices.length) body = <p className="dim">Looking for drives...</p>;
+  if (state === "loading" && !devices.length) body = <Busy>Asking the system which drives are attached...</Busy>;
   else if (state === "error") body = <p className="dim">Could not list drives: {error}</p>;
   else if (!devices.length) body = <p className="dim">No drives were found. You can still type an image file path below.</p>;
   else
@@ -25,9 +25,8 @@ export function DrivePicker({ selected, onPick }: { selected: string; onPick: (p
               {deviceTitle(d)} {d.system && <Badge tone="red">System drive</Badge>} {d.removable && <Badge tone="dim">Removable</Badge>}
             </span>
             <span className="dm">
-              {fmtBytes(d.size)}, {busLabel(d.bus)}
+              {fmtBytes(d.size)}, {busLabel(d.bus)} · <span className="mono">{d.path}</span>
             </span>
-            <span className="dp mono">{d.path}</span>
           </button>
         ))}
       </div>
@@ -38,7 +37,7 @@ export function DrivePicker({ selected, onPick }: { selected: string; onPick: (p
       title="Drives"
       actions={
         <Button small disabled={state === "loading"} onClick={() => void loadDevices()}>
-          Refresh
+          {state === "loading" ? "Refreshing..." : "Refresh"}
         </Button>
       }
     >

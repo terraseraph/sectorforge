@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CliInfo, Device, Job } from "../lib/contract";
 import { systemDriveFor } from "../lib/devices";
 
-export type Screen = "image" | "partitions" | "recover";
+export type Screen = "home" | "image" | "partitions" | "recover";
 export type LoadState = "idle" | "loading" | "loaded" | "error";
 
 export const IDLE = "Idle. Nothing is running.";
@@ -33,7 +33,7 @@ export interface AppState {
 }
 
 export const useApp = create<AppState>(() => ({
-  screen: "image",
+  screen: "home",
   running: null,
   activity: IDLE,
   error: "",

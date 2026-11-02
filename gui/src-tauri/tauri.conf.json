@@ -4,14 +4,14 @@
   "version": "0.2.0",
   "identifier": "io.github.terraseraph.sectorforge",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run vite",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
-      { "title": "SectorForge", "width": 1100, "height": 780, "minWidth": 900, "minHeight": 640 }
+      { "label": "main", "create": false, "title": "SectorForge", "width": 1100, "height": 780, "minWidth": 900, "minHeight": 640 }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"

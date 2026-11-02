@@ -7,6 +7,8 @@ pub mod block_device;
 pub mod carve;
 pub mod device;
 pub mod drives;
+pub mod ext;
+pub mod fat;
 pub mod imager;
 pub mod mapfile;
 pub mod ntfs;

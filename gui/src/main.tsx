@@ -6,8 +6,6 @@ import { startBridge } from "./store/bridge";
 import "./styles.css";
 
 async function boot() {
-  // In a plain browser (`npm run dev` without the Tauri window) a mock stands in for the Rust side.
-  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) await import("./dev/devmock");
   await startBridge();
   await restoreAfterElevation();
 

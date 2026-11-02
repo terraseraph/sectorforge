@@ -11,8 +11,8 @@ import { CarveTab } from "./CarveTab";
 import { FilesTab } from "./FilesTab";
 
 const TABS = [
-  { id: "files", label: "Files (NTFS)" },
-  { id: "carve", label: "Carve" },
+  { id: "files", label: "Browse files" },
+  { id: "carve", label: "Carve by file type" },
 ] as const;
 
 export function RecoverScreen() {
@@ -25,29 +25,35 @@ export function RecoverScreen() {
     <>
       <h2>Recover files</h2>
       <p className="lead">
-        Recover from an image or straight from a live drive, by filesystem (NTFS) or by carving sectors. Nothing here ever writes to the source.
+        Recover from an image or straight from a live drive, by filesystem (NTFS, FAT, exFAT, ext) or by carving sectors. Nothing here ever writes to the source.
       </p>
       <ErrorAlert />
-      <DrivePicker selected={input} onPick={setSource} />
-      <Panel label="Source">
-        <Field
-          id="rsrc"
-          label="Source"
-          action={
-            <Button
-              onClick={async () => {
-                const v = await dialogs.openFile("Choose an image file");
-                if (v !== null) setSource(v);
-              }}
+      <div className="cols">
+        <div>
+          <DrivePicker selected={input} onPick={setSource} />
+        </div>
+        <div>
+          <Panel label="Source">
+            <Field
+              id="rsrc"
+              label="Source"
+              action={
+                <Button
+                  onClick={async () => {
+                    const v = await dialogs.openFile("Choose an image file");
+                    if (v !== null) setSource(v);
+                  }}
+                >
+                  Browse
+                </Button>
+              }
             >
-              Browse
-            </Button>
-          }
-        >
-          <TextInput id="rsrc" value={input} placeholder="\\.\PhysicalDrive1, /dev/sdb, or an image file" onChange={(e) => setSource(e.target.value)} />
-        </Field>
-        <SourceNotes source={source} />
-      </Panel>
+              <TextInput id="rsrc" value={input} placeholder="\\.\PhysicalDrive1, /dev/sdb, or an image file" onChange={(e) => setSource(e.target.value)} />
+            </Field>
+            <SourceNotes source={source} />
+          </Panel>
+        </div>
+      </div>
 
       <div className="tabs" role="tablist" aria-label="Recovery method">
         {TABS.map((t) => (

@@ -1,1 +1,1 @@
-{"event":"error","message":"files currently supports NTFS only (no recognizable filesystem at LBA 0)"}
+{"event":"error","message":"files supports NTFS, FAT12/16/32, exFAT and ext2/3/4 (no recognizable filesystem at LBA 0)"}
