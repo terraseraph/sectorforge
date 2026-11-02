@@ -1,0 +1,8 @@
+{"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"files_progress","records_read":256,"records_total":256}
+{"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":46,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"deleted_photo.jpg","parent_id":44,"path":"/Pictures/deleted_photo.jpg","recoverable":"full","size":150000}
+{"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":47,"is_dir":true,"modified":"2026-11-02T06:28:39Z","name":"OldStuff","parent_id":5,"path":"/OldStuff","recoverable":"full","size":0}
+{"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":48,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"letter.txt","parent_id":47,"path":"/OldStuff/letter.txt","recoverable":"full","size":9000}
+{"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":49,"is_dir":true,"modified":"2026-11-02T06:28:39Z","name":"inner","parent_id":47,"path":"/OldStuff/inner","recoverable":"full","size":0}
+{"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":50,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"memo.txt","parent_id":49,"path":"/OldStuff/inner/memo.txt","recoverable":"full","size":700}
+{"deleted":5,"event":"done","files":5}

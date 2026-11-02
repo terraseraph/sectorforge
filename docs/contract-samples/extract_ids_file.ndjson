@@ -1,0 +1,7 @@
+{"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"files_progress","records_read":256,"records_total":256}
+{"complete":false,"event":"extracted","id":76,"note":"This file is NTFS-compressed, which SectorForge can't decompress yet, so it was left empty.","path":"compressed.txt","size":0}
+{"bytes_done":65536,"bytes_total":215536,"event":"extract_progress","files_done":1,"files_total":2}
+{"complete":true,"event":"extracted","id":46,"note":null,"path":"Pictures/deleted_photo.jpg","size":150000}
+{"bytes_done":215536,"bytes_total":215536,"event":"extract_progress","files_done":2,"files_total":2}
+{"event":"done","extracted":2,"failed":0}

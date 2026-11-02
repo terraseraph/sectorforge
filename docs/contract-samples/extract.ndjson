@@ -1,0 +1,12 @@
+{"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"files_progress","records_read":256,"records_total":256}
+{"complete":true,"event":"extracted","id":46,"note":null,"path":"Pictures/deleted_photo.jpg","size":150000}
+{"bytes_done":150000,"bytes_total":155300,"event":"extract_progress","files_done":1,"files_total":7}
+{"complete":true,"event":"extracted","id":39,"note":null,"path":"Documents","size":0}
+{"complete":true,"event":"extracted","id":40,"note":null,"path":"Documents/report.txt","size":300}
+{"complete":true,"event":"extracted","id":41,"note":null,"path":"Documents/notes","size":0}
+{"complete":true,"event":"extracted","id":42,"note":null,"path":"Documents/notes/deep","size":0}
+{"complete":true,"event":"extracted","id":43,"note":null,"path":"Documents/notes/deep/nested.txt","size":5000}
+{"complete":false,"event":"extracted","id":4000000,"note":"there is no file or folder with id 4000000 on this volume","path":null,"size":0}
+{"bytes_done":155300,"bytes_total":155300,"event":"extract_progress","files_done":7,"files_total":7}
+{"event":"done","extracted":6,"failed":1}

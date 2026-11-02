@@ -1,0 +1,9 @@
+{"event":"start","mode":"file","sector_size":512,"size":2097152,"source":"carve-disk.img"}
+{"complete":true,"event":"file","name":"jpg/f0000128.jpg","offset":65536,"size":3286,"type":"jpg"}
+{"complete":true,"event":"file","name":"png/f0000512.png","offset":262144,"size":19821,"type":"png"}
+{"complete":true,"event":"file","name":"gif/f0001024.gif","offset":524288,"size":6679,"type":"gif"}
+{"complete":true,"event":"file","name":"zip/f0001536.zip","offset":786432,"size":1120,"type":"zip"}
+{"complete":true,"event":"file","name":"docx/f0002048.docx","offset":1048576,"size":271,"type":"docx"}
+{"complete":true,"event":"file","name":"pdf/f0002560.pdf","offset":1310720,"size":98,"type":"pdf"}
+{"bytes_scanned":2097152,"bytes_total":2097152,"event":"carve_progress","files_found":6}
+{"bytes_written":31275,"event":"done","files_found":6}

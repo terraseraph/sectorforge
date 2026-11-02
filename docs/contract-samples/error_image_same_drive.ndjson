@@ -1,0 +1,1 @@
+{"event":"error","message":"refusing to start: --dest x.img is on the source drive (PhysicalDrive1). Writing to a failing drive is how data gets destroyed. Choose a location on a different drive."}

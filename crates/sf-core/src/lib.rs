@@ -4,10 +4,16 @@
 
 pub mod aligned_buf;
 pub mod block_device;
+pub mod carve;
 pub mod device;
+pub mod drives;
 pub mod imager;
 pub mod mapfile;
+pub mod ntfs;
 pub mod partitions;
+pub mod reader;
+pub mod sanitize;
+pub mod timefmt;
 
 pub use block_device::BlockDevice;
 pub use imager::{Imager, ImagerConfig, Progress};
