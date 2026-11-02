@@ -1,5 +1,6 @@
 // Typed wrappers for the Tauri commands in src-tauri/src/lib.rs.
-import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { showDialog } from "../store/dialog";
 import type { CliInfo, Ev, Restore } from "./contract";
 import { inTauri, invoke } from "./ipc";
 
@@ -59,15 +60,20 @@ export function errorText(e: unknown): string {
 
 const single = (v: string | string[] | null) => (typeof v === "string" ? v : null);
 
-// A browser tab can't open the native pickers, so it asks for the path as text.
-export const dialogs = {
-  openFile: async (title: string) => (inTauri ? single(await open({ title })) : prompt(title)),
-  openFolder: async (title: string) => (inTauri ? single(await open({ title, directory: true })) : prompt(title)),
-  saveFile: async (title: string, defaultPath?: string) => (inTauri ? single(await save({ title, defaultPath })) : prompt(title, defaultPath)),
-  confirmReadDrive: async (what: string) => {
-    const msg = `You are about to ${what} by reading the live drive directly. That is fine for a healthy drive, but reading a failing drive repeatedly can make it worse.
+// A browser tab can't open the native pickers, so it asks for the path as text, in the app's own dialog
+// (never prompt()/confirm(): some webviews block them and answer "Cancel" without showing anything).
+const askPath = (title: string, input = "") => showDialog({ title, input, okLabel: "OK" });
 
-If the drive is failing, image it first (Image screen) and recover from the image.`;
-    return inTauri ? ask(msg, { title: "Read the drive directly?", kind: "warning", okLabel: "Read the drive", cancelLabel: "Cancel" }) : confirm(msg);
-  },
+export const dialogs = {
+  openFile: async (title: string) => (inTauri ? single(await open({ title })) : askPath(title)),
+  openFolder: async (title: string) => (inTauri ? single(await open({ title, directory: true })) : askPath(title)),
+  saveFile: async (title: string, defaultPath?: string) => (inTauri ? single(await save({ title, defaultPath })) : askPath(title, defaultPath)),
+  confirmReadDrive: async (what: string) =>
+    (await showDialog({
+      title: "Read the drive directly?",
+      message: `You are about to ${what} by reading the live drive directly. That is fine for a healthy drive, but reading a failing drive repeatedly can make it worse.
+
+If the drive is failing, image it first (Image screen) and recover from the image.`,
+      okLabel: "Read the drive",
+    })) !== null,
 };
