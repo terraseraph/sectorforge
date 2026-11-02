@@ -247,7 +247,7 @@ pub fn wants_pkexec(args: &[String], elevated: bool, linux: bool) -> bool {
 /// Inside an AppImage the sidecar sits on a FUSE mount that root usually cannot read
 /// (no allow_other), so pkexec would fail with permission denied.
 pub fn needs_private_copy(cli: &Path, appdir: Option<&std::ffi::OsStr>) -> bool {
-    appdir.is_some_and(|d| !d.is_empty() && cli.starts_with(d)) || cli.starts_with("/tmp/.mount_")
+    appdir.is_some_and(|d| !d.is_empty() && cli.starts_with(d)) || cli.to_string_lossy().starts_with("/tmp/.mount_")
 }
 
 /// Where the root-readable copy lives: $XDG_RUNTIME_DIR/sectorforge, else a unique dir under /tmp.
