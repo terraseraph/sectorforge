@@ -97,4 +97,23 @@ describe("file browser", () => {
     expect(screen.getByText("lost.doc")).toBeInTheDocument();
     expect(screen.queryByText("notes.txt")).toBeNull();
   });
+
+  test("clicking a column header sorts the list; clicking again reverses it", () => {
+    listing();
+    render(<FileBrowser />);
+    fireEvent.click(screen.getByRole("button", { name: "Name" }));
+    expect(useRecover.getState().sort).toEqual({ key: "name", desc: false });
+    fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+    expect(useRecover.getState().sort).toEqual({ key: "name", desc: true });
+    fireEvent.click(screen.getByRole("button", { name: "Size" }));
+    expect(useRecover.getState().sort).toEqual({ key: "size", desc: true });
+  });
+
+  test("a type checkbox narrows the list to that kind of file", () => {
+    listing();
+    render(<FileBrowser />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Images" }));
+    expect(screen.getByText('<img src=x onerror="alert(1)">.jpg')).toBeInTheDocument();
+    expect(screen.queryByText("notes.txt")).toBeNull();
+  });
 });

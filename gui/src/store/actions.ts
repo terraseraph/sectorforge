@@ -233,7 +233,8 @@ export async function startListing() {
     recordsTotal: 0,
     doneInfo: "",
     folder: "/",
-    filter: NO_FILTER,
+    // A deleted-only run has no live folders to browse through, so start on the flat list of everything it found.
+    filter: deletedOnlyRun ? { ...NO_FILTER, deletedOnly: true } : NO_FILTER,
     extract: NO_EXTRACT,
     filesVersion: s.filesVersion + 1,
     selVersion: s.selVersion + 1,

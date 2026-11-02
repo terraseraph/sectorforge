@@ -92,6 +92,12 @@ describe("starting jobs", () => {
     expect(useApp.getState().running).toBeNull();
   });
 
+  test("a deleted-only listing opens on the flat deleted view (it has no live folders to browse)", async () => {
+    useRecover.setState({ source: "E:\disk.img", sourceEdited: true, lba: 2048, deletedOnlyRun: true });
+    await startListing();
+    expect(useRecover.getState().filter.deletedOnly).toBe(true);
+  });
+
   test("extract uses the source and partition that were listed, not the current fields", async () => {
     useRecover.setState({ listedFor: { source: "E:\\a.img", lba: 2048 }, source: "E:\\other.img", sourceEdited: true, lba: 999, out: "F:\\rec" });
     useApp.setState({ running: "files" });

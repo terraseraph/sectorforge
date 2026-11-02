@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { VirtualList } from "../../components/VirtualList";
 import { Badge, Button, Check, type Tone, cx } from "../../components/ui";
-import { ORPHANS, REC_NAME, crumbs, noFilter } from "../../lib/filestore";
+import { type FileKind, KINDS, ORPHANS, REC_NAME, type SortKey, crumbs, extOf, noFilter } from "../../lib/filestore";
 import { fmtBytes, fmtCount, fmtDate } from "../../lib/format";
 import { clearSelection, setSelected } from "../../store/actions";
 import { NO_FILTER, files, selection, useRecover } from "../../store/recover";
@@ -18,16 +18,25 @@ const RECOVERABLE: Record<(typeof REC_NAME)[number], { label: string; tone: Tone
 const navigate = (folder: string) => useRecover.setState({ folder });
 const clearFilters = () => useRecover.setState({ filter: NO_FILTER });
 
+// Size and date read best biggest/newest first; name and type A to Z.
+const FIRST_DESC: Record<SortKey, boolean> = { name: false, type: false, modified: true, size: true };
+const sortOn = (key: SortKey) =>
+  useRecover.setState((s) => ({ sort: { key, desc: s.sort?.key === key ? !s.sort.desc : FIRST_DESC[key] } }));
+
 export function FileBrowser() {
   const filesVersion = useRecover((s) => s.filesVersion);
   const selVersion = useRecover((s) => s.selVersion);
   const folder = useRecover((s) => s.folder);
   const filter = useRecover((s) => s.filter);
   const listing = useRecover((s) => s.listing);
+  const sort = useRecover((s) => s.sort);
   const flat = !noFilter(filter);
 
   // filesVersion stands in for the (mutable) store's contents.
-  const view = useMemo(() => (flat ? files.search(filter) : files.list(folder)), [flat, filter, folder, filesVersion]);
+  const view = useMemo(() => {
+    const base = flat ? files.search(filter) : files.list(folder);
+    return sort ? files.sortBy(base, sort) : base;
+  }, [flat, filter, folder, sort, filesVersion]);
   const allShownSelected = useMemo(() => view.length > 0 && view.every((i) => selection.has(i)), [view, selVersion]);
 
   const empty = listing === "running" ? "Reading the file table..." : flat ? "Nothing matches these filters." : "This folder is empty.";
@@ -44,9 +53,10 @@ export function FileBrowser() {
           disabled={view.length === 0}
           onChange={(e) => setSelected(view, e.target.checked)}
         />
-        <span>Name</span>
-        <span>Modified (UTC)</span>
-        <span>Size</span>
+        <SortHead k="name">Name</SortHead>
+        <SortHead k="type">Type</SortHead>
+        <SortHead k="modified">Modified (UTC)</SortHead>
+        <SortHead k="size">Size</SortHead>
         <span>State</span>
         <span>Recoverable</span>
       </div>
@@ -55,11 +65,24 @@ export function FileBrowser() {
         rowHeight={ROW_H}
         label="Files and folders"
         empty={empty}
-        resetKey={flat ? `search:${JSON.stringify(filter)}` : folder}
+        resetKey={`${flat ? `search:${JSON.stringify(filter)}` : folder}|${JSON.stringify(sort)}`}
         renderRow={(k) => <FileRow index={view[k]!} flat={flat} />}
       />
       <SelectionSummary />
     </>
+  );
+}
+
+function SortHead({ k, children }: { k: SortKey; children: string }) {
+  const sort = useRecover((s) => s.sort);
+  const on = sort?.key === k;
+  return (
+    <span>
+      <button type="button" className={cx("sorth", on && "on")} title={`Sort by ${children.toLowerCase()}`} onClick={() => sortOn(k)}>
+        {children}
+        {on && <span aria-label={sort.desc ? ", descending" : ", ascending"}>{sort.desc ? " ▼" : " ▲"}</span>}
+      </button>
+    </span>
   );
 }
 
@@ -122,6 +145,8 @@ function Filters({ count, flat }: { count: number; flat: boolean }) {
 
   const setFlag = (key: "deletedOnly" | "recoverableOnly") => (on: boolean) =>
     useRecover.setState((s) => ({ filter: { ...s.filter, [key]: on } }));
+  const setKind = (kind: FileKind) => (on: boolean) =>
+    useRecover.setState((s) => ({ filter: { ...s.filter, kinds: on ? [...s.filter.kinds, kind] : s.filter.kinds.filter((k) => k !== kind) } }));
   const total = fmtCount(files.count);
 
   return (
@@ -133,6 +158,13 @@ function Filters({ count, flat }: { count: number; flat: boolean }) {
       <Check checked={filter.recoverableOnly} onChange={setFlag("recoverableOnly")}>
         Recoverable only
       </Check>
+      <span className="kinds" role="group" aria-label="File types">
+        {KINDS.map((k) => (
+          <Check key={k.id} checked={filter.kinds.includes(k.id)} onChange={setKind(k.id)}>
+            {k.label}
+          </Check>
+        ))}
+      </span>
       <span className="dim count">
         {flat
           ? `${fmtCount(count)} matches (of ${total} entries)`
@@ -179,6 +211,7 @@ function FileRow({ index: i, flat }: { index: number; flat: boolean }) {
           </Button>
         )}
       </span>
+      <span className="m dim">{dir ? "" : extOf(name).toUpperCase()}</span>
       <span className="m dim">{fmtDate(files.modified[i])}</span>
       <span className="m">{dir ? "Folder" : fmtBytes(files.sizes[i] ?? 0)}</span>
       <span>{files.isDeleted(i) && <Badge tone="amber">Deleted</Badge>}</span>

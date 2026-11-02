@@ -1,6 +1,6 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
-import { FileStore, ORPHANS, crumbs, splitPath, joinPath, noFilter } from "./filestore";
+import { FileStore, ORPHANS, crumbs, splitPath, joinPath, noFilter, kindOf, type Filter } from "./filestore";
 import type { FileRow } from "./contract";
 
 const row = (id: number, path: string | null, o: Partial<FileRow> = {}): FileRow =>
@@ -20,7 +20,7 @@ function sample() {
   ]);
   return s;
 }
-const f = (o: Partial<{ deletedOnly: boolean; recoverableOnly: boolean; text: string }> = {}) => ({ deletedOnly: false, recoverableOnly: false, text: "", ...o });
+const f = (o: Partial<Filter> = {}): Filter => ({ deletedOnly: false, recoverableOnly: false, text: "", kinds: [], ...o });
 
 test("splitPath handles root, nesting and sloppy slashes", () => {
   assert.deepEqual(splitPath("/a"), { dir: "/", leaf: "a" });
@@ -53,6 +53,31 @@ test("sorted list refreshes when a folder gains entries", () => {
   const names = s.list("/Users/terra").map((i) => s.names[i]);
   assert.equal(names.length, 4);
   assert.equal(names[1], "0first.txt");
+});
+
+test("sortBy keeps folders first and orders by size, type, date or name, either way", () => {
+  const s = new FileStore();
+  s.addMany([
+    row(1, "/b.zip", { size: 50, modified: "2026-01-02T00:00:00Z" }),
+    row(2, "/a.txt", { size: 900, modified: "2026-03-01T00:00:00Z" }),
+    row(3, "/dir", { is_dir: true, size: 0 }),
+    row(4, "/c.JPG", { size: 5, modified: null }),
+  ]);
+  const names = (key: "name" | "type" | "modified" | "size", desc = false) => s.sortBy(s.list("/"), { key, desc }).map((i) => s.names[i]);
+  assert.deepEqual(names("size", true), ["dir", "a.txt", "b.zip", "c.JPG"]);
+  assert.deepEqual(names("size"), ["dir", "c.JPG", "b.zip", "a.txt"]);
+  assert.deepEqual(names("type"), ["dir", "c.JPG", "a.txt", "b.zip"]);
+  assert.deepEqual(names("modified", true), ["dir", "a.txt", "b.zip", "c.JPG"]);
+  assert.deepEqual(names("name", true), ["dir", "c.JPG", "b.zip", "a.txt"]);
+});
+
+test("type filter: picks files by kind, never folders", () => {
+  const s = sample();
+  assert.equal(kindOf("b.JPG"), "image");
+  assert.equal(kindOf("README"), "other");
+  assert.deepEqual(s.search(f({ kinds: ["image"] })).map((i) => s.names[i]), ["b.JPG"]);
+  assert.deepEqual(s.search(f({ kinds: ["document", "other"] })).map((i) => s.names[i]).sort(), ["a.txt", "lost.doc", "top.bin"]);
+  assert.equal(noFilter(f({ kinds: ["video"] })), false);
 });
 
 test("pathOf and folderOf", () => {

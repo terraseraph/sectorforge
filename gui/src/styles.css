@@ -114,7 +114,7 @@ button.lnk:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .vl-row > * { height: 100%; }
 .vl-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); pointer-events: none; }
 .vl-empty[hidden] { display: none; }
-.frow { display: grid; grid-template-columns: 24px minmax(0, 1fr) 120px 90px 70px 150px; gap: 10px; align-items: center; padding: 0 10px; }
+.frow { display: grid; grid-template-columns: 24px minmax(0, 1fr) 56px 120px 90px 70px 150px; gap: 10px; align-items: center; padding: 0 10px; }
 .frow.sel { background: rgba(79, 209, 197, .08); }
 .frow .nm, .xrow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .frow .m, .xrow .m { font: 12.5px var(--mono); white-space: nowrap; }
@@ -373,3 +373,6 @@ h2 + .lead { margin-bottom: 12px; }
 .dialog h3 { margin: 0 0 10px; font-size: 15px; }
 .dialog-msg { margin: 0 0 12px; color: var(--dim); white-space: pre-line; }
 .dialog .actions { justify-content: flex-end; }
+.sorth { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.sorth:hover, .sorth.on { color: var(--text); }
+.filters .kinds { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-left: 14px; border-left: 1px solid var(--border); }

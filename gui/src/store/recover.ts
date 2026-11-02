@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { CarveType } from "../lib/contract";
-import { FileStore, type Filter } from "../lib/filestore";
+import { FileStore, type Filter, type Sort } from "../lib/filestore";
 
 export type RunState = "" | "running" | "done" | "stopped" | "error";
 
@@ -42,6 +42,8 @@ export interface RecoverState {
   doneInfo: string;
   folder: string;
   filter: Filter;
+  /** null = folders first, then by name (search results: listing order). */
+  sort: Sort | null;
   /** Bumped when `files` changes (it is mutable and too big to copy). */
   filesVersion: number;
   /** Bumped when `selection` changes. */
@@ -59,7 +61,7 @@ export interface RecoverState {
 
 export const NO_EXTRACT: ExtractState = { state: "", filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, rows: [], summary: "" };
 export const NO_CARVE: CarveState = { state: "", scanned: 0, total: 0, found: 0, rows: [], summary: "" };
-export const NO_FILTER: Filter = { deletedOnly: false, recoverableOnly: false, text: "" };
+export const NO_FILTER: Filter = { deletedOnly: false, recoverableOnly: false, text: "", kinds: [] };
 
 export const useRecover = create<RecoverState>(() => ({
   tab: "files",
@@ -74,6 +76,7 @@ export const useRecover = create<RecoverState>(() => ({
   doneInfo: "",
   folder: "/",
   filter: NO_FILTER,
+  sort: null,
   filesVersion: 0,
   selVersion: 0,
   out: "",
