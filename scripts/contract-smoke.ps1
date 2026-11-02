@@ -203,7 +203,7 @@ $png = $found | Where-Object { $_.type -eq 'png' }
 Check ($png -and -not $png.complete) "PNG overlapping a bad map range must be complete:false"
 
 Write-Host "`n== carve error paths"
-$ev = Run @('carve', '--source', 'carve-disk.img', '--out', 'c2', '--types', 'exe', '--json') 1 'error_carve_unknown_type'
+$ev = Run @('carve', '--source', 'carve-disk.img', '--out', 'c2', '--types', 'bogus', '--json') 1 'error_carve_unknown_type'
 $ev = Run @('carve', '--source', 'carve-disk.img', '--out', 'c3', '--start', '9000', '--end', '100', '--json') 1 $null
 $ev = Run @('carve', '--source', 'carve-disk.img', '--out', 'c4', '--map', 'wrong-size.map', '--json') 1 'error_carve_wrong_map'
 Check ($ev[-1].message -match 'Wrong map') "wrong-size map message"
@@ -244,7 +244,7 @@ Check (@(Events $ev 'file' | Where-Object { -not $_.deleted }).Count -eq 0) "--d
 Check ((Events $ev 'file').Count -ge 4) "--deleted-only finds the deleted fixture entries"
 
 $ev = Run @('files', '--source', 'carve-disk.img', '--partition-lba', '0', '--json') 1 'error_files_not_ntfs'
-Check ($ev[-1].message -match 'NTFS only') "non-NTFS message"
+Check ($ev[-1].message -match 'no recognizable filesystem') "unsupported-filesystem message"
 $ev = Run @('files', '--source', 'ntfs.vhd', '--partition-lba', '999999999', '--json') 1 $null
 
 Write-Host "`n== extract"

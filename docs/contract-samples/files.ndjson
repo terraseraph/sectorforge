@@ -1,5 +1,7 @@
 {"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"phase","message":"Opening the NTFS volume and finding its file table ($MFT)"}
 {"event":"files_progress","records_read":256,"records_total":256}
+{"event":"phase","message":"Working out folder paths and sending the file list"}
 {"created":"2026-11-02T06:28:36Z","deleted":false,"event":"file","id":36,"is_dir":true,"modified":"2026-11-02T06:28:38Z","name":"System Volume Information","parent_id":5,"path":"/System Volume Information","recoverable":"full","size":0}
 {"created":"2026-11-02T06:28:36Z","deleted":false,"event":"file","id":37,"is_dir":false,"modified":"2026-11-02T06:28:36Z","name":"WPSettings.dat","parent_id":36,"path":"/System Volume Information/WPSettings.dat","recoverable":"full","size":12}
 {"created":"2026-11-02T06:28:38Z","deleted":false,"event":"file","id":38,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"IndexerVolumeGuid","parent_id":36,"path":"/System Volume Information/IndexerVolumeGuid","recoverable":"full","size":76}

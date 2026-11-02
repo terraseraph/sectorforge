@@ -1,5 +1,7 @@
 {"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"phase","message":"Opening the NTFS volume and finding its file table ($MFT)"}
 {"event":"files_progress","records_read":256,"records_total":256}
+{"event":"phase","message":"Working out folder paths and sending the file list"}
 {"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":46,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"deleted_photo.jpg","parent_id":44,"path":"/Pictures/deleted_photo.jpg","recoverable":"full","size":150000}
 {"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":47,"is_dir":true,"modified":"2026-11-02T06:28:39Z","name":"OldStuff","parent_id":5,"path":"/OldStuff","recoverable":"full","size":0}
 {"created":"2026-11-02T06:28:38Z","deleted":true,"event":"file","id":48,"is_dir":false,"modified":"2026-11-02T06:28:38Z","name":"letter.txt","parent_id":47,"path":"/OldStuff/letter.txt","recoverable":"full","size":9000}

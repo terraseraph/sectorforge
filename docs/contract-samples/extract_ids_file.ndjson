@@ -1,4 +1,5 @@
 {"event":"start","filesystem":"ntfs","mode":"file","partition_lba":128,"sector_size":512,"size":16777728,"source":"ntfs.vhd"}
+{"event":"phase","message":"Opening the NTFS volume and finding its file table ($MFT)"}
 {"event":"files_progress","records_read":256,"records_total":256}
 {"complete":false,"event":"extracted","id":76,"note":"This file is NTFS-compressed, which SectorForge can't decompress yet, so it was left empty.","path":"compressed.txt","size":0}
 {"bytes_done":65536,"bytes_total":215536,"event":"extract_progress","files_done":1,"files_total":2}
