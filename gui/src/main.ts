@@ -1,53 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import type { CliInfo, Ev, Exit, FileRow, Job, Restore, Totals } from "./contract.ts";
+import { systemDriveFor } from "./devices.ts";
 import { cellsFromBlocks, type Block } from "./map.ts";
+import { mountPicker, refreshPicker } from "./picker.ts";
+import * as recover from "./recover.ts";
+import { beginScan, loadDevices, renderStatusBar, setActivity, showError, st, type Screen } from "./state.ts";
+import { $, esc, fmt, isDevice } from "./util.ts";
 import "./style.css";
 
-// ---- contract types (docs/cli-contract.md) ----
-interface Totals { finished: number; bad_sector: number; non_trimmed: number; non_scraped: number; non_tried: number }
-interface Partition { start_lba: number; size_sectors: number | null; filesystem: string; confidence: string; source: string; label: string | null }
-type Ev =
-  | { event: "start"; source: string; mode: "device" | "file"; size: number; sector_size: number; resumed: boolean }
-  | { event: "pass_start"; pass: number; name: string }
-  | { event: "progress"; pass: number; current_pos: number; bytes_total: number; bytes_rescued: number; bytes_bad: number; bytes_pending: number }
-  | { event: "pass_complete"; pass: number }
-  | { event: "done"; totals: Totals }
-  | { event: "error"; message: string }
-  | { event: "status"; size: number; current_pos: number; totals: Totals; blocks: Block[] }
-  | { event: "scan_progress"; bytes_scanned: number; bytes_total: number }
-  | { event: "result"; table_kind: string; partitions: Partition[] };
-interface Exit { job: string; code: number | null; stderr: string }
-
-// ---- helpers ----
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
-function fmt(n: number): string {
-  const u = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return `${i ? n.toFixed(n < 10 ? 2 : 1) : n} ${u[i]}`;
-}
-const isDevice = (s: string) => s.startsWith("\\\\.\\") || s.startsWith("/dev/");
-const MODE_TEXT = {
-  device: ["Direct hardware access", "SectorForge reads the physical drive itself. It needs Administrator rights, and it only ever reads from the drive. Reading a failing drive stresses it, so the first pass skips damage quickly."],
-  file: ["Image file", "SectorForge is working on a file, not the drive, so the original hardware is not touched and the file can be re-read as often as needed."],
-} as const;
 const CELLS = 1000;
-
-// ---- state ----
-const st = {
-  screen: "image" as "image" | "partitions" | "recover",
-  running: "" as "" | "image" | "scan",
-  activity: "Idle. Nothing is running.",
-  mode: "" as "" | "device" | "file", // from the CLI's start event; falls back to the source field
-  hasMap: false, mapDone: false,
-  source: "", dest: "", map: "",
-  deviceSize: 0, sectorSize: 512,
-  pass: "", pollTimer: 0 as number,
-  partitions: null as null | { kind: string; list: Partition[] },
-  error: "",
-};
 
 // ---- shell ----
 const app = $("app");
@@ -55,25 +18,31 @@ app.innerHTML = `
 <div class="shell">
   <nav aria-label="Screens"><h1>SectorForge</h1>
     <button data-s="image">Image</button><button data-s="partitions">Partitions</button><button data-s="recover">Recover</button></nav>
-  <main id="main"></main>
+  <div class="content"><div id="banner" class="banner" role="alert" hidden></div><main id="main"></main></div>
   <footer class="status" role="status" aria-live="polite"><span id="act"></span><span class="mode" id="mode"></span></footer>
 </div>`;
-app.querySelectorAll<HTMLButtonElement>("nav button").forEach((b) => (b.onclick = () => go(b.dataset.s as typeof st.screen)));
+app.querySelectorAll<HTMLButtonElement>("nav button").forEach((b) => (b.onclick = () => go(b.dataset.s as Screen)));
 
-function renderStatusBar() {
-  $("act").textContent = st.activity;
-  const m = st.mode || (st.source ? (isDevice(st.source) ? "device" : "file") : "");
-  $("mode").innerHTML = m ? `Mode: <b>${MODE_TEXT[m][0]}</b>. ${MODE_TEXT[m][1]}` : "Mode: choose a source to see how SectorForge will access it.";
-}
-function setActivity(t: string) { st.activity = t; renderStatusBar(); }
-function showError(msg: string) { st.error = msg; const e = document.getElementById("err"); if (e) { e.textContent = msg; e.hidden = !msg; } }
-
-function go(s: typeof st.screen) {
+function go(s: Screen) {
   st.screen = s;
   app.querySelectorAll("nav button").forEach((b) => (b as HTMLElement).dataset.s === s ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   showError("");
-  ({ image: renderImage, partitions: renderPartitions, recover: renderRecover })[s]();
+  ({ image: renderImage, partitions: renderPartitions, recover: recover.renderRecover })[s]();
   renderStatusBar();
+}
+
+/** Launch check: where is sf-cli and does it speak the contract this app was built for? */
+function drawBanner() {
+  const b = $("banner"), c = st.cli;
+  b.hidden = !c?.problem;
+  if (!c?.problem) return;
+  b.innerHTML = `<b>sf-cli problem.</b> ${esc(c.problem)}
+    <details><summary>Where SectorForge looked</summary><ul>${c.searched.map((p) => `<li class="mono">${esc(p)}</li>`).join("")}</ul></details>`;
+}
+async function checkCli() {
+  try { st.cli = (await invoke("cli_info")) as CliInfo; }
+  catch (e) { st.cli = { path: "", searched: [], found: false, version: null, contract: null, problem: "Could not check sf-cli: " + String(e), platform: "", pkexec: true }; }
+  drawBanner();
 }
 
 // ---- Image screen ----
@@ -82,10 +51,13 @@ function renderImage() {
   <h2>Image a drive</h2>
   <p class="lead">Copy a failing drive to a safe file first, then work on the copy. Pause any time; running the same copy again picks up where it stopped.</p>
   <div class="alert" id="err" role="alert" hidden></div>
+  <div id="picker"></div>
   <section class="panel" aria-label="Image settings">
     <div class="field"><label for="src">Source</label><input type="text" id="src" spellcheck="false" placeholder="\\\\.\\PhysicalDrive1 or C:\\path\\disk.img" /><button class="btn" id="bsrc">Browse</button></div>
     <p class="hint"><code>\\\\.\\PhysicalDrive1</code> = direct hardware access (needs Administrator). Any other path = image file.</p>
+    <div id="sysbox"></div>
     <div class="field"><label for="dst">Destination</label><input type="text" id="dst" spellcheck="false" /><button class="btn" id="bdst">Choose</button></div>
+    <p class="hint">Save the image on a different drive from the one you are rescuing. SectorForge refuses to write onto the source drive.</p>
     <div class="field"><label for="map">Map file</label><input type="text" id="map" spellcheck="false" /><button class="btn" id="bmap">Choose</button></div>
     <p class="hint">The map file records what has been copied. Keep it with the destination; it is what makes pause and resume work.</p>
     <details><summary>Advanced</summary>
@@ -112,8 +84,10 @@ function renderImage() {
   for (const k of ["src", "dst", "map"] as const) {
     const el = $<HTMLInputElement>(k);
     el.value = { src: st.source, dst: st.dest, map: st.map }[k];
-    el.oninput = () => { st.source = $<HTMLInputElement>("src").value; st.dest = $<HTMLInputElement>("dst").value; st.map = $<HTMLInputElement>("map").value; st.mode = ""; renderStatusBar(); };
+    el.oninput = () => { st.source = $<HTMLInputElement>("src").value; st.dest = $<HTMLInputElement>("dst").value; st.map = $<HTMLInputElement>("map").value; st.mode = ""; renderStatusBar(); refreshPicker(); drawSysBox(); syncButtons(); };
   }
+  mountPicker($("picker"), (path) => pick("src", path));
+  drawSysBox();
   $("map").onchange = () => pollStatus(true);
   $("bsrc").onclick = async () => pick("src", await open({ title: "Choose a source image file" }));
   $("bdst").onclick = async () => pick("dst", await save({ title: "Destination image file" }));
@@ -127,10 +101,29 @@ function pick(id: string, v: string | string[] | null) {
   if (typeof v !== "string") return;
   const el = $<HTMLInputElement>(id); el.value = v; el.dispatchEvent(new Event("input"));
 }
+/** Imaging the drive the OS runs from needs a deliberate, explicit yes. */
+function systemBlock() {
+  const d = systemDriveFor(st.devices, st.source);
+  return d && st.systemConfirmed !== st.source.trim().toLowerCase() ? d : undefined;
+}
+function drawSysBox() {
+  const box = document.getElementById("sysbox");
+  if (!box) return;
+  const d = systemDriveFor(st.devices, st.source);
+  if (!d) { box.innerHTML = ""; return; }
+  const ok = st.systemConfirmed === st.source.trim().toLowerCase();
+  box.innerHTML = `<div class="notice danger"><p><b>This is your system drive.</b> It holds the operating system SectorForge is running on, so it is in constant use and cannot be copied cleanly while you are using it. A failing drive you are rescuing is normally a different one.</p>
+    <label class="check"><input type="checkbox" id="sysok"${ok ? " checked" : ""} /> I understand, and I want to image the system drive anyway</label></div>`;
+  $<HTMLInputElement>("sysok").onchange = (e) => {
+    st.systemConfirmed = (e.target as HTMLInputElement).checked ? st.source.trim().toLowerCase() : "";
+    syncButtons();
+  };
+}
 function syncButtons() {
   const b = (id: string) => document.getElementById(id) as HTMLButtonElement;
   const run = st.running === "image";
-  if (document.getElementById("start")) { b("start").disabled = !!st.running; b("pause").disabled = !run; b("resume").disabled = !!st.running || !st.hasMap || st.mapDone; }
+  const blocked = !!systemBlock();
+  if (document.getElementById("start")) { b("start").disabled = !!st.running || blocked; b("pause").disabled = !run; b("resume").disabled = !!st.running || !st.hasMap || st.mapDone || blocked; }
 }
 
 let lastStatus: { size: number; blocks: Block[] } | null = null;
@@ -169,14 +162,15 @@ async function pollStatus(quiet = false) {
 
 async function startImage() {
   if (!st.source || !st.dest || !st.map) return showError("Choose a source, a destination and a map file first.");
+  if (systemBlock()) return showError("That is your system drive. Tick the box under the Source field if you really mean to image it.");
   showError("");
   const kib = (id: string) => Number($<HTMLInputElement>(id).value) * 1024;
-  try {
-    await invoke("start_image", { a: { source: st.source, dest: st.dest, map: st.map, chunkSize: kib("chunk"), skipSize: kib("skip"), retries: Number($<HTMLInputElement>("retries").value) } });
-  } catch (e) { return showError(String(e)); }
   st.running = "image"; st.mode = ""; tiles.pass = "-";
   setActivity(`Starting: opening ${st.source}...`);
   syncButtons();
+  try {
+    await invoke("start_image", { a: { source: st.source, dest: st.dest, map: st.map, chunkSize: kib("chunk"), skipSize: kib("skip"), retries: Number($<HTMLInputElement>("retries").value) } });
+  } catch (e) { st.running = ""; setActivity("Idle. Nothing is running."); syncButtons(); return showError(String(e)); }
   clearInterval(st.pollTimer);
   st.pollTimer = window.setInterval(() => pollStatus(true), 1000);
 }
@@ -188,6 +182,7 @@ function renderPartitions() {
   <h2>Find partitions</h2>
   <p class="lead">Read the partition table and, if needed, search the whole drive for filesystems. Nothing is written.</p>
   <div class="alert" id="err" role="alert" hidden></div>
+  <div id="picker"></div>
   <section class="panel" aria-label="Scan settings">
     <div class="field"><label for="psrc">Source</label><input type="text" id="psrc" spellcheck="false" placeholder="\\\\.\\PhysicalDrive1 or an image file" /><span></span></div>
     <label><input type="checkbox" id="deep" /> Deep scan (reads the entire drive, slow, finds partitions missing from the table)</label>
@@ -196,13 +191,14 @@ function renderPartitions() {
   </section>
   <section class="panel" id="results" hidden aria-label="Partitions found"></section>`;
   const src = $<HTMLInputElement>("psrc"); src.value = st.source;
-  src.oninput = () => { st.source = src.value; st.mode = ""; renderStatusBar(); };
+  src.oninput = () => { st.source = src.value; st.mode = ""; renderStatusBar(); refreshPicker(); };
+  mountPicker($("picker"), (path) => { src.value = path; src.dispatchEvent(new Event("input")); });
   $("scan").onclick = async () => {
     if (!st.source) return showError("Enter a source first.");
-    showError(""); st.partitions = null; scanPct = 0;
-    try { await invoke("start_scan", { source: st.source, deep: $<HTMLInputElement>("deep").checked }); }
+    showError(""); scanPct = 0;
+    try { await beginScan(st.source, $<HTMLInputElement>("deep").checked); }
     catch (e) { return showError(String(e)); }
-    st.running = "scan"; st.mode = ""; setActivity(`Reading the partition table of ${st.source}...`); drawScan();
+    drawScan();
   };
   $("cancel").onclick = () => { invoke("stop_scan"); };
   drawScan();
@@ -240,12 +236,6 @@ function drawScan() {
       : `<p>No partitions were found.</p>`}`;
 }
 
-// ---- Recover (placeholder) ----
-function renderRecover() {
-  $("main").innerHTML = `<h2>Recover files</h2><p class="lead">Browsing and copying files out of a partition is coming.</p>
-  <section class="panel"><p style="margin:0">Nothing here yet. For now: image the drive, then find its partitions. Both work on the safe copy, so the later file recovery step will too.</p></section>`;
-}
-
 // ---- events from Rust ----
 function onImageEvent(ev: Ev) {
   switch (ev.event) {
@@ -269,19 +259,44 @@ function onScanEvent(ev: Ev) {
     case "scan_progress":
       scanPct = (ev.bytes_scanned / ev.bytes_total) * 100;
       setActivity(`Scanning the whole drive for filesystems: ${scanPct.toFixed(1)}% (${fmt(ev.bytes_scanned)} of ${fmt(ev.bytes_total)}).`); drawScan(); break;
-    case "result": st.partitions = { kind: ev.table_kind, list: ev.partitions }; drawScan(); break;
+    case "result": st.partitions = { kind: ev.table_kind, list: ev.partitions, source: st.scanSource.trim() }; drawScan(); break;
     case "error": showError(ev.message); break;
   }
 }
 
-listen<{ job: string; event: Ev }>("sf-event", (e) => (e.payload.job === "image" ? onImageEvent : onScanEvent)(e.payload.event));
-listen<string>("sf-log", (e) => console.warn("sf-cli:", e.payload));
-listen<Exit>("sf-exit", async (e) => {
-  const x = e.payload;
-  st.running = ""; clearInterval(st.pollTimer);
-  if (x.code !== null && x.code !== 0 && !st.error) showError(`sf-cli stopped with exit code ${x.code}.${x.stderr ? " " + x.stderr.trim() : ""}`);
-  if (x.job === "image") { await pollStatus(true); syncButtons(); if (x.code === 0) setActivity("Idle. Last run finished."); else if (x.code === null) setActivity("Paused. The map was saved; press Resume to continue."); }
-  else { setActivity(x.code === 0 ? "Idle. Scan finished." : x.code === null ? "Scan cancelled." : "Scan stopped by an error."); drawScan(); }
-});
+type Payload = { job: Job; event: Ev };
+const ROUTE: Record<Job, (ev: Ev) => void> = {
+  image: onImageEvent, scan: onScanEvent,
+  files: (ev) => recover.onEvent("files", ev), carve: (ev) => recover.onEvent("carve", ev), extract: (ev) => recover.onEvent("extract", ev),
+};
 
-go("image");
+async function main() {
+  // Outside the Tauri window (plain `vite` in a browser) a mock stands in for the Rust side, for layout checks.
+  if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) await import("./devmock.ts");
+  await listen<Payload>("sf-event", (e) => ROUTE[e.payload.job](e.payload.event));
+  await listen<{ job: Job; files: FileRow[] }>("sf-files", (e) => recover.onFiles(e.payload.job, e.payload.files));
+  await listen<string>("sf-log", (e) => console.warn("sf-cli:", e.payload));
+  await listen<Exit>("sf-exit", async (e) => {
+    const x = e.payload;
+    st.running = ""; clearInterval(st.pollTimer);
+    if (x.code !== null && x.code !== 0 && !st.error) showError(`sf-cli stopped with exit code ${x.code}.${x.stderr ? " " + x.stderr.trim() : ""}`);
+    if (x.job === "image") { await pollStatus(true); syncButtons(); if (x.code === 0) setActivity("Idle. Last run finished."); else if (x.code === null) setActivity("Paused. The map was saved; press Resume to continue."); }
+    else if (x.job === "scan") { setActivity(x.code === 0 ? "Idle. Scan finished." : x.code === null ? "Scan cancelled." : "Scan stopped by an error."); drawScan(); recover.onScanDone(); }
+    else recover.onExit(x);
+  });
+
+  // After "Restart as Administrator" the new process gets the old settings back.
+  let screen: Screen = "image";
+  try {
+    const r = (await invoke("startup_restore")) as Restore | null;
+    if (r) {
+      st.source = r.source; st.dest = r.dest; st.map = r.map;
+      if (r.screen === "partitions" || r.screen === "recover") screen = r.screen;
+    }
+  } catch { /* not fatal */ }
+  go(screen);
+  checkCli();
+  loadDevices(() => { refreshPicker(); drawSysBox(); syncButtons(); });
+  if (st.map) pollStatus(true);
+}
+main();

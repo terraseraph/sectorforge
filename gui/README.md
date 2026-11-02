@@ -1,36 +1,97 @@
 # SectorForge GUI
 
-Tauri 2 + plain TypeScript/Vite. The GUI never links `sf-core`; it spawns `sf-cli --json` and parses NDJSON (see `../docs/cli-contract.md`).
+Tauri 2 + plain TypeScript/Vite. The GUI never links `sf-core`; it spawns `sf-cli --json` and parses NDJSON (see `../docs/cli-contract.md`, contract v2).
 
-## Run
+Screens: **Image** (drive picker, live health map), **Partitions** (drive picker, scan), **Recover** (browse and extract files from NTFS including deleted ones, or carve by file signature).
+
+## Develop
 
 ```powershell
 $env:Path += ";$env:USERPROFILE\.cargo\bin"
 cargo build -p sf-cli          # in the repo root; produces target\debug\sf-cli.exe
 cd gui; npm install
-npm run tauri dev              # or: npm run tauri build -- --debug
+npm run tauri dev              # real app
+npm run dev                    # UI only, in a browser: a mock stands in for Rust (src/devmock.ts)
 ```
 
-Reading a physical drive (`\\.\PhysicalDriveN`) needs the **GUI** started as Administrator, since the child inherits its rights.
+`npm run dev` in a plain browser is for checking layout. Add `?n=5000000` to try a huge listing, `?cli=missing` or `?cli=old` to see the sf-cli banner, `?elevated=1` to hide the Administrator prompt.
+
+Reading a physical drive needs elevated rights. On Windows the picker offers **Restart as Administrator** (relaunches the exe with the `runas` verb and keeps the source, destination and map). On Linux device-mode jobs run through `pkexec` when the user is not root or in the `disk` group.
 
 ## Locating sf-cli
 
-1. `SF_CLI_PATH` environment variable (full path), else
-2. `<repo>/target/debug/sf-cli.exe`, then `<repo>/target/release/sf-cli.exe` (repo path baked in at compile time), else
-3. `sf-cli` on `PATH`.
+Lookup order (`src-tauri/src/cli.rs`, `resolve`):
 
-If none works the UI shows a message saying where it looked.
+1. `SF_CLI_PATH` environment variable (full path; used even if missing, so the error names it)
+2. the directory of the SectorForge executable (portable zip, AppImage sidecar)
+3. dev: `<repo>/target/debug`, then `<repo>/target/release` (repo path baked in at compile time)
+4. `sf-cli` on `PATH`
+
+At launch the app runs `sf-cli version --json`. If sf-cli is missing, too old, or `contract` is not 2, a banner names the file it found and what to do.
+
+## Release build
+
+CI runs these from the repo root. Outputs: a portable Windows zip and a Linux AppImage.
+
+### Windows (portable zip)
+
+```powershell
+cargo build --release -p sf-cli
+cd gui
+npm ci
+npm run tauri -- build --no-bundle        # gui\src-tauri\target\release\sectorforge-gui.exe (or <repo>\target\release if a workspace target dir is used; check both)
+```
+
+The release exe has no console window (`windows_subsystem = "windows"` in `src-tauri/src/main.rs`; sf-cli is spawned with `CREATE_NO_WINDOW`).
+
+Zip layout (both files side by side, no installer):
+
+```
+SectorForge-windows-x64.zip
+  SectorForge.exe      <- sectorforge-gui.exe, renamed
+  sf-cli.exe           <- target\release\sf-cli.exe
+```
+
+```powershell
+$app = "gui\src-tauri\target\release\sectorforge-gui.exe"
+New-Item -ItemType Directory -Force dist-zip | Out-Null
+Copy-Item $app dist-zip\SectorForge.exe
+Copy-Item target\release\sf-cli.exe dist-zip\sf-cli.exe
+Compress-Archive dist-zip\* SectorForge-windows-x64.zip -Force
+```
+
+WebView2 must be on the machine (preinstalled on Windows 11 and current Windows 10).
+
+### Linux (AppImage, sf-cli as a Tauri sidecar)
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+cargo build --release -p sf-cli
+cd gui
+npm ci
+npm run stage-sidecar                      # copies target/release/sf-cli to src-tauri/binaries/sf-cli-<host triple>
+npm run tauri -- build --bundles appimage  # gui/src-tauri/target/release/bundle/appimage/*.AppImage
+```
+
+`src-tauri/tauri.linux.conf.json` (merged on Linux only) sets the `appimage` target and `bundle.externalBin: ["binaries/sf-cli"]`. Tauri places the sidecar next to the app binary inside the AppImage, which is where the lookup order finds it. The sidecar entry is Linux-only on purpose: Tauri checks that the staged file exists at build time, so on Linux `cargo test` and `tauri dev` also need `npm run stage-sidecar` first. On CI runners without FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+`src-tauri/binaries/` is gitignored.
 
 ## Layout
 
-- `src-tauri/src/cli.rs` - typed `Event` enum, line parser, process spawn/kill, unit tests
-- `src-tauri/src/lib.rs` - Tauri commands: `start_image`, `stop_image`, `get_status`, `start_scan`, `stop_scan`; emits `sf-event`, `sf-log`, `sf-exit`
-- `src/main.ts` - three screens + status bar; `src/map.ts` - blocks to health-map cells (worst status per cell)
-- `fixtures/*.ndjson` - sample CLI output used by the tests
+- `src-tauri/src/cli.rs` - typed `Event` enum (all v2 events), line parser, sf-cli lookup, pkexec wrapping, process spawn/kill, unit tests
+- `src-tauri/src/lib.rs` - Tauri commands (`start_*`/`stop_*` for image, scan, carve, files, extract; `cli_info`, `list_devices`, `list_types`, `restart_as_admin`, `startup_restore`); `file` events are batched (2000 or 80 ms) into `sf-files`; other events go as `sf-event`; process end as `sf-exit`
+- `src/main.ts` - shell, version banner, Image and Partitions screens, event routing
+- `src/picker.ts` - drive picker and elevation notice; `src/devices.ts` - drive helpers
+- `src/recover.ts` - Recover screen; `src/filestore.ts` - column store, folder tree from paths, filters; `src/vlist.ts` + `src/virtual.ts` - virtualized list and its windowing math; `src/recoverlogic.ts` - map/partition helpers
+- `src/map.ts` - blocks to health-map cells (worst status per cell)
+- `src/devmock.ts` - browser-only stand-in for the Rust side (dev builds only)
+- `fixtures/*.ndjson` - sample CLI output; `v2_*` are hand-written from the contract (regenerate with `node scripts/gen-v2-fixtures.mjs`), `real_*` come from the actual sf-cli. Files in `../docs/contract-samples/` are parsed by the Rust tests too.
 
 ## Tests
 
 ```powershell
-cd src-tauri; cargo test    # NDJSON parsing against fixtures
-cd ..; npm test             # health-map cell logic
+cd src-tauri; cargo test    # NDJSON parsing of every event, sf-cli lookup order, argument quoting
+cd ..; npm test             # health map, file tree/filter store, virtualization, drive and map helpers
+npm run build               # type check + production bundle
 ```

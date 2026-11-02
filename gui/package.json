@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test src/map.test.ts",
+    "test": "node --experimental-strip-types --test \"src/*.test.ts\"",
+    "stage-sidecar": "node scripts/stage-sidecar.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

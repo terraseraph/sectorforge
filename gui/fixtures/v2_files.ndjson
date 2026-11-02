@@ -1,0 +1,8 @@
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
+{"event":"files_progress","records_read":65536,"records_total":1200000}
+{"event":"file","id":5,"parent_id":5,"name":".","path":"/","is_dir":true,"size":0,"deleted":false,"modified":null,"created":null,"recoverable":"full"}
+{"event":"file","id":4200,"parent_id":5,"name":"Users","path":"/Users","is_dir":true,"size":0,"deleted":false,"modified":"2024-03-01T00:00:00Z","created":"2024-03-01T00:00:00Z","recoverable":"full"}
+{"event":"file","id":4211,"parent_id":4200,"name":"IMG_4821.JPG","path":"/Users/IMG_4821.JPG","is_dir":false,"size":4404019,"deleted":true,"modified":"2024-03-11T09:12:00Z","created":"2024-03-11T09:12:00Z","recoverable":"full"}
+{"event":"file","id":4300,"parent_id":9999,"name":"lost.doc","path":null,"is_dir":false,"size":2048,"deleted":true,"modified":null,"created":null,"recoverable":"partial"}
+{"event":"file","id":4301,"parent_id":4200,"name":"gone.bin","path":"/Users/gone.bin","is_dir":false,"size":10,"deleted":true,"modified":null,"created":null,"recoverable":"none","extra":"ignored"}
+{"event":"done","files":5,"deleted":3}

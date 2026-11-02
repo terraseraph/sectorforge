@@ -1,0 +1,5 @@
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512}
+{"event":"carve_progress","bytes_scanned":4194304,"bytes_total":2000398934016,"files_found":3}
+{"event":"file","offset":1048576,"size":2381702,"type":"jpg","name":"jpg/f0002048.jpg","complete":true}
+{"event":"file","offset":9437184,"size":88000,"type":"png","name":"png/f0018432.png","complete":false}
+{"event":"done","files_found":2,"bytes_written":2469702}
