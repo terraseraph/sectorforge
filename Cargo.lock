@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "sf-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "sf-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "libc",
