@@ -448,7 +448,7 @@ pub fn run() {
     #[cfg(windows)]
     if std::env::args().any(|a| a == "--elevated") {
         if let Some(base) = std::env::var_os("LOCALAPPDATA") {
-            let dir = PathBuf::from(base).join("au.com.oztechinnovations.sectorforge").join("EBWebView-admin");
+            let dir = PathBuf::from(base).join("io.github.terraseraph.sectorforge").join("EBWebView-admin");
             std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", dir);
         }
     }

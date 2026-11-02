@@ -120,7 +120,7 @@ Lists physical drives. Works without elevation (fields that need it may be
 
 ```json
 {"event":"devices","elevated":false,"devices":[
-  {"path":"\\.\PhysicalDrive1","model":"WDC WD20EZRZ-00Z5HB0","serial":"WD-WCC4M0123456",
+  {"path":"\\\\.\\PhysicalDrive1","model":"WDC WD20EZRZ-00Z5HB0","serial":"WD-WCC4M0123456",
    "size":2000398934016,"sector_size":512,"bus":"sata","removable":false,"system":false}
 ]}
 ```
@@ -162,7 +162,7 @@ no original names or folders. `--types` defaults to all; `--start`/`--end`
 limit the byte range (e.g. one partition).
 
 ```json
-{"event":"start","source":"E:\image.img","mode":"file","size":2000398934016,"sector_size":512}
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512}
 {"event":"carve_progress","bytes_scanned":4194304,"bytes_total":2000398934016,"files_found":3}
 {"event":"file","offset":1048576,"size":2381702,"type":"jpg","name":"jpg/f0002048.jpg","complete":true}
 {"event":"done","files_found":3,"bytes_written":5120000}
@@ -179,7 +179,7 @@ ones. `N` is the partition's `start_lba` from `scan` (512-byte units). Other
 filesystems: `error` "files currently supports NTFS only".
 
 ```json
-{"event":"start","source":"E:\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
 {"event":"files_progress","records_read":65536,"records_total":1200000}
 {"event":"file","id":4211,"parent_id":5,"name":"IMG_4821.JPG","path":"/Users/terra/Pictures/IMG_4821.JPG",
  "is_dir":false,"size":4404019,"deleted":true,"modified":"2024-03-11T09:12:00Z","created":"2024-03-11T09:12:00Z","recoverable":"full"}
@@ -206,7 +206,7 @@ everything under it. Use `--ids-file` (one id per line) for large selections;
 Windows limits command lines to ~32k characters.
 
 ```json
-{"event":"start","source":"E:\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
 {"event":"files_progress","records_read":65536,"records_total":1200000}
 {"event":"extract_progress","files_done":1,"files_total":2,"bytes_done":4404019,"bytes_total":4500000}
 {"event":"extracted","id":4211,"path":"Users/terra/Pictures/IMG_4821.JPG","size":4404019,"complete":true,"note":null}
