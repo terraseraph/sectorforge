@@ -10,7 +10,7 @@ import { VList } from "./vlist.ts";
 
 const ROW_H = 30;
 
-interface ExRow { path: string; size: number; complete: boolean; note: string | null }
+interface ExRow { path: string | null; size: number; complete: boolean; note: string | null }
 interface CarvedRow { name: string; type: string; size: number; offset: number; complete: boolean }
 
 const rc = {
@@ -364,7 +364,7 @@ function renderExRow(k: number, row: HTMLElement) {
   const r = rc.ex.rows[k];
   if (!r) { row.innerHTML = ""; return; }
   row.className = "vl-row xrow";
-  row.innerHTML = `<span class="nm" title="${esc(r.note ?? "")}">${esc(r.path)}</span><span class="m">${esc(fmt(r.size))}</span>
+  row.innerHTML = `<span class="nm" title="${esc(r.note ?? "")}">${esc(r.path ?? "(not written)")}</span><span class="m">${esc(fmt(r.size))}</span>
     <span>${r.complete ? `<span class="badge" style="--c:var(--green)">Complete</span>` : `<span class="badge" style="--c:var(--amber)">Incomplete</span>`}</span>
     <span class="dim note">${esc(r.note ?? "")}</span>`;
 }
@@ -520,6 +520,9 @@ export function onEvent(job: Job, ev: Ev) {
     else if (ev.event === "extract_progress") {
       Object.assign(rc.ex, { filesDone: ev.files_done, filesTotal: ev.files_total, bytesDone: ev.bytes_done, bytesTotal: ev.bytes_total });
       setActivity(`Extracting: ${fmtCount(ev.files_done)} of ${fmtCount(ev.files_total)} files.`);
+    } else if (ev.event === "files_progress") {
+      // extract also reads the MFT first; the extract bar only follows extract_progress
+      setActivity(`Reading the file table before extracting: ${fmtCount(ev.records_read)} of ${fmtCount(ev.records_total)} records.`);
     } else if (ev.event === "extracted") {
       rc.ex.rows.push({ path: ev.path, size: ev.size, complete: ev.complete, note: ev.note });
     } else if (ev.event === "done") {

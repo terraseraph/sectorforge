@@ -33,7 +33,7 @@ export type Ev =
   | { event: "carve_progress"; bytes_scanned: number; bytes_total: number; files_found: number }
   | { event: "files_progress"; records_read: number; records_total: number }
   | { event: "extract_progress"; files_done: number; files_total: number; bytes_done: number; bytes_total: number }
-  | { event: "extracted"; id: number; path: string; size: number; complete: boolean; note: string | null };
+  | { event: "extracted"; id: number; path: string | null; size: number; complete: boolean; note: string | null };
 
 export interface Exit { job: string; code: number | null; stderr: string }
 

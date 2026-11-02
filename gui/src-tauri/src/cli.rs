@@ -137,7 +137,9 @@ pub enum Event {
     ExtractProgress { files_done: u64, files_total: u64, bytes_done: u64, bytes_total: u64 },
     Extracted {
         id: u64,
-        path: String,
+        /// null when the item could not be written at all (counted in `done.failed`).
+        #[serde(default)]
+        path: Option<String>,
         #[serde(default)]
         size: u64,
         complete: bool,
@@ -599,8 +601,12 @@ mod tests {
         let Event::Extracted { complete, note, path, .. } = &ev[3] else { panic!() };
         assert!(!complete);
         assert!(note.as_deref().unwrap().contains("unreadable"));
-        assert_eq!(path, "_orphaned/lost.doc");
-        assert!(matches!(&ev[4], Event::Done { extracted: Some(2), failed: Some(0), .. }));
+        assert_eq!(path.as_deref(), Some("_orphaned/lost.doc"));
+        // an item that could not be written at all has path null; it must parse, not vanish
+        let Event::Extracted { id, path, size, complete, note } = &ev[4] else { panic!("null-path line was rejected") };
+        assert_eq!((*id, path.as_deref(), *size, *complete), (4213, None, 0, false));
+        assert!(note.as_deref().unwrap().contains("MFT"));
+        assert!(matches!(&ev[5], Event::Done { extracted: Some(2), failed: Some(1), .. }));
     }
 
     #[test]

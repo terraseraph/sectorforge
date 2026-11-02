@@ -44,6 +44,7 @@ out("v2_extract.ndjson", [
   { event: "extract_progress", files_done: 1, files_total: 2, bytes_done: 4404019, bytes_total: 4500000 },
   { event: "extracted", id: 4211, path: "Users/terra/Pictures/IMG_4821.JPG", size: 4404019, complete: true, note: null },
   { event: "extracted", id: 4212, path: "_orphaned/lost.doc", size: 2048, complete: false, note: "Part of this file was unreadable and has been left blank." },
-  { event: "done", extracted: 2, failed: 0 },
+  { event: "extracted", id: 4213, path: null, size: 0, complete: false, note: "The MFT record for this file could not be read." },
+  { event: "done", extracted: 2, failed: 1 },
 ]);
 out("v2_image_refusal.ndjson", [{ event: "error", message: "The destination is on the drive being imaged. Choose a folder on a different drive." }]);
