@@ -2,6 +2,8 @@
 //! speaks the NDJSON contract in `docs/cli-contract.md`, which is how the GUI
 //! drives it.
 
+mod recover;
+
 use std::fs::OpenOptions;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
@@ -13,6 +15,8 @@ use serde_json::{json, Value};
 use sf_core::partitions;
 use sf_core::{BlockDevice, Confidence, FsKind, Imager, ImagerConfig, MapFile, PartitionSource, Progress, Status, TableKind};
 
+/// Bumped whenever the JSON contract changes incompatibly.
+const CONTRACT_VERSION: u32 = 2;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
@@ -68,6 +72,64 @@ enum Command {
         /// partitions missing from (or deleted from) the partition table.
         #[arg(long)]
         deep: bool,
+    },
+    /// Print the version and the JSON contract version.
+    Version,
+    /// List physical drives.
+    Devices,
+    /// Recover files by their header signatures (no filesystem needed).
+    Carve {
+        /// Usually the cloned image; a raw device path also works.
+        #[arg(long, required_unless_present = "list_types")]
+        source: Option<String>,
+        /// Folder to write recovered files into (created if missing).
+        #[arg(long, required_unless_present = "list_types")]
+        out: Option<PathBuf>,
+        /// Comma-separated type ids (see --list-types). Default: all.
+        #[arg(long, value_delimiter = ',')]
+        types: Vec<String>,
+        /// First byte to scan.
+        #[arg(long)]
+        start: Option<u64>,
+        /// Stop scanning at this byte (exclusive).
+        #[arg(long)]
+        end: Option<u64>,
+        /// Imaging mapfile for this source: unrescued ranges count as unreadable.
+        #[arg(long)]
+        map: Option<PathBuf>,
+        /// List the supported file types and exit.
+        #[arg(long)]
+        list_types: bool,
+    },
+    /// List files and folders (including deleted ones) on an NTFS partition.
+    Files {
+        #[arg(long)]
+        source: String,
+        /// Partition start, in 512-byte sectors (`start_lba` from `scan`).
+        #[arg(long)]
+        partition_lba: u64,
+        #[arg(long)]
+        deleted_only: bool,
+        #[arg(long)]
+        map: Option<PathBuf>,
+    },
+    /// Copy files out of an NTFS partition by id (from `files`).
+    Extract {
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        partition_lba: u64,
+        /// Comma-separated ids; a folder id extracts everything under it.
+        #[arg(long, value_delimiter = ',', required_unless_present = "ids_file", conflicts_with = "ids_file")]
+        ids: Vec<u64>,
+        /// File with one id per line (for large selections).
+        #[arg(long)]
+        ids_file: Option<PathBuf>,
+        /// Folder to recreate the selected files' folder structure in.
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        map: Option<PathBuf>,
     },
 }
 
@@ -266,6 +328,7 @@ struct ImageArgs {
 }
 
 fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
+    recover::guard_outputs(&a.source, &[("--dest", &a.dest), ("--map", &a.map)])?;
     let device = open_device(&a.source)?;
     let size = device.size_bytes();
     let sector_size = device.sector_size();
@@ -460,6 +523,37 @@ fn main() -> ExitCode {
         ),
         Command::Status { map } => run_status(out, &map),
         Command::Scan { source, deep } => run_scan(out, &source, deep),
+        Command::Version => {
+            let v = env!("CARGO_PKG_VERSION");
+            out.event(json!({"event": "version", "version": v, "contract": CONTRACT_VERSION}));
+            if !out.json {
+                println!("sf-cli {v} (JSON contract v{CONTRACT_VERSION})");
+            }
+            Ok(())
+        }
+        Command::Devices => recover::run_devices(out),
+        Command::Carve { list_types: true, .. } => {
+            recover::run_list_types(out);
+            Ok(())
+        }
+        Command::Carve { source, out: out_dir, types, start, end, map, .. } => recover::run_carve(
+            out,
+            recover::CarveArgs {
+                source: source.expect("clap requires --source"),
+                out_dir: out_dir.expect("clap requires --out"),
+                types,
+                start,
+                end,
+                map,
+            },
+        ),
+        Command::Files { source, partition_lba, deleted_only, map } => {
+            recover::run_files(out, &source, partition_lba, deleted_only, map.as_ref())
+        }
+        Command::Extract { source, partition_lba, ids, ids_file, out: out_dir, map } => recover::run_extract(
+            out,
+            recover::ExtractArgs { source, partition_lba, ids, ids_file, out_dir, map },
+        ),
     };
 
     match result {

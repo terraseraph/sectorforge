@@ -59,6 +59,7 @@ Events, in order:
     (resuming would leave holes in the image);
   - **(v2)** in device mode, `--dest` or `--map` is on a volume that lives on
     the source drive. Writing to a failing drive is how data gets destroyed.
+    It also refuses if it can't tell which drive an output is on.
 
 ## `sf-cli status --map M --json`
 
@@ -192,7 +193,10 @@ filesystems: `error` "files currently supports NTFS only".
 - `recoverable`: `"full"` (all data readable and, for deleted files, its
   clusters are not marked in use by something else), `"partial"` (some data
   unreadable or overwritten), `"none"` (no data left, e.g. all clusters
-  reused). Directories are `"full"`.
+  reused). Directories are `"full"`. NTFS-compressed or encrypted files are
+  `"partial"` (their data can't be decoded yet).
+- The volume root (id 5) and NTFS's own metadata files (records 0–15 such
+  as `$MFT`, and everything inside `$Extend`) are not listed.
 
 ## `sf-cli extract --source S --partition-lba N (--ids 1,2,3 | --ids-file F) --out DIR [--map M] --json` (v2)
 
@@ -203,6 +207,7 @@ Windows limits command lines to ~32k characters.
 
 ```json
 {"event":"start","source":"E:\image.img","mode":"file","size":2000398934016,"sector_size":512,"partition_lba":2048,"filesystem":"ntfs"}
+{"event":"files_progress","records_read":65536,"records_total":1200000}
 {"event":"extract_progress","files_done":1,"files_total":2,"bytes_done":4404019,"bytes_total":4500000}
 {"event":"extracted","id":4211,"path":"Users/terra/Pictures/IMG_4821.JPG","size":4404019,"complete":true,"note":null}
 {"event":"done","extracted":2,"failed":0}
@@ -212,3 +217,21 @@ Windows limits command lines to ~32k characters.
 - `complete: false` + `note` (plain English) when data was unreadable,
   overwritten, or the file uses a feature not supported yet (e.g. NTFS
   compression). Whatever could be recovered is still written.
+- **(v2.1 clarifications, additive)**
+  - Before any `extract_progress`, the CLI reads the whole MFT (needed to
+    resolve folders and paths) and emits the same `files_progress` events as
+    `files` while it does.
+  - Each selected id (and each file/folder under a selected folder) gets
+    exactly one `extracted` event, folders included (`size` 0). If nothing
+    could be written for an item (unknown id, unreadable record, output
+    error), its event has `"path": null`, `"complete": false` and a `note`
+    saying why, and it is counted in `done.failed` instead of
+    `done.extracted`.
+  - Nothing that already exists is overwritten: a name collision (e.g. a
+    deleted and a live `report.docx` in the same folder) gets ` (id N)`
+    before the extension. Orphans are written as
+    `_orphaned/<name> (id N)<ext>`; an orphaned folder keeps its contents
+    under it.
+  - Names are sanitized for both Windows and Linux: `\ / : * ? " < > |` and
+    control characters become `_`, trailing dots/spaces become `_`, and
+    reserved names (`CON`, `aux.txt`, `COM1`…) get a leading `_`.
