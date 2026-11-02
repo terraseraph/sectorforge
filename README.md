@@ -13,13 +13,30 @@ It brings together ideas from ddrescue, TestDisk/PhotoRec, DMDE and R-Studio
 behind an interface that explains what it is doing and why. It runs on
 Windows and Linux as a portable app: no installer.
 
+**Download the portable app** (v0.3.0, nothing to install, just run it):
+
+- **Windows 10/11:** [SectorForge-v0.3.0-windows-x64.exe](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-windows-x64.exe)
+- **Linux:** [SectorForge-v0.3.0-x86_64.AppImage](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-x86_64.AppImage) (`chmod +x`, then run it)
+
+Newer versions and the command-line tool are on the [Releases page](https://github.com/terraseraph/sectorforge/releases/latest). See [Download](#download) for notes.
+
 ![SectorForge imaging a disk, finding its partition, recovering deleted files and carving by file type](docs/media/demo.gif)
 
-**Just want the app?** Download `SectorForge-…-windows-x64.exe` (Windows) or
-`SectorForge-…-x86_64.AppImage` (Linux) from the
-**[latest release](https://github.com/terraseraph/sectorforge/releases/latest)**
-and run it. It's one portable file: nothing to install, nothing to unpack.
-See [Download](#download) for the details.
+## Screenshots
+
+Taken on test images (the NTFS fixture in `crates/sf-core/tests/fixtures`
+and the carving disk from `scripts/contract-smoke.ps1`). Serial numbers are
+hidden.
+
+| | |
+|---|---|
+| **Home.** Every attached drive with its partitions, and a flag on any that returned read errors. ![Home](docs/media/01-home.png) | **Drive inspector.** Click a drive for its details and what you can do with it. Here, a real drive that failed a read. ![Drive inspector](docs/media/02-drive-inspector.png) |
+| **Drive details.** Model, serial, size, sector size, connection, and whether it's the system drive. ![Drive details](docs/media/03-drives.png) | **Image a drive.** Two-pass cloning with a live health map. ![Image a drive](docs/media/04-image.png) |
+| **Map viewer.** Open any map file to see what was rescued and where the bad sectors are. ![Map viewer](docs/media/05-map-viewer.png) | **Find partitions.** Reads the table; deep scan finds volumes it no longer lists. ![Find partitions](docs/media/06-partitions.png) |
+| **Browse files.** Real names and folders, with recoverability for each file. ![Browse files](docs/media/07-files.png) | **Deleted files.** Filter to what was deleted, including whole folders. ![Deleted files](docs/media/08-files-deleted.png) |
+| **Extract.** Tick files or folders and copy them to a safe drive. ![Extract](docs/media/09-extract.png) | **Carve.** About 95 file types found by their contents when there's no filesystem. ![Carve](docs/media/10-carve.png) |
+| **Verify.** SHA-256 of an image or drive: the same fingerprint means an identical copy. ![Verify](docs/media/11-verify.png) | **Console.** Every `sf-cli` command the app ran and what it printed (Ctrl+\`). ![Console](docs/media/12-console.png) |
+
 
 > **If a drive is failing, stop using it.** Every hour it runs can make
 > things worse. Don't install anything onto it, and don't run repair tools
@@ -127,21 +144,6 @@ it only ever *reads* the source drive.
     blanks.
   - Recovered names are sanitized, so nothing can be written outside the
     output folder.
-
-## Screenshots
-
-Taken on test images (the NTFS fixture in `crates/sf-core/tests/fixtures`
-and the carving disk from `scripts/contract-smoke.ps1`). Serial numbers are
-hidden.
-
-| | |
-|---|---|
-| **Home.** Every attached drive with its partitions, and a flag on any that returned read errors. ![Home](docs/media/01-home.png) | **Drive inspector.** Click a drive for its details and what you can do with it. Here, a real drive that failed a read. ![Drive inspector](docs/media/02-drive-inspector.png) |
-| **Drive details.** Model, serial, size, sector size, connection, and whether it's the system drive. ![Drive details](docs/media/03-drives.png) | **Image a drive.** Two-pass cloning with a live health map. ![Image a drive](docs/media/04-image.png) |
-| **Map viewer.** Open any map file to see what was rescued and where the bad sectors are. ![Map viewer](docs/media/05-map-viewer.png) | **Find partitions.** Reads the table; deep scan finds volumes it no longer lists. ![Find partitions](docs/media/06-partitions.png) |
-| **Browse files.** Real names and folders, with recoverability for each file. ![Browse files](docs/media/07-files.png) | **Deleted files.** Filter to what was deleted, including whole folders. ![Deleted files](docs/media/08-files-deleted.png) |
-| **Extract.** Tick files or folders and copy them to a safe drive. ![Extract](docs/media/09-extract.png) | **Carve.** About 95 file types found by their contents when there's no filesystem. ![Carve](docs/media/10-carve.png) |
-| **Verify.** SHA-256 of an image or drive: the same fingerprint means an identical copy. ![Verify](docs/media/11-verify.png) | **Console.** Every `sf-cli` command the app ran and what it printed (Ctrl+\`). ![Console](docs/media/12-console.png) |
 
 ## Command line
 
