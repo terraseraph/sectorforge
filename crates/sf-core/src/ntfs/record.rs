@@ -76,7 +76,6 @@ pub struct NonResident {
     pub runs: Vec<Run>,
     pub data_size: u64,
     pub init_size: u64,
-    pub compression_unit: u8,
 }
 
 /// Parses a fixed-up record. `None` if any structure is out of bounds.
@@ -132,7 +131,6 @@ fn parse_attr(a: &[u8]) -> Option<Attr> {
             runs,
             data_size: u64_at(a, 0x30),
             init_size: u64_at(a, 0x38),
-            compression_unit: a[0x22],
         })
     };
     Some(Attr {

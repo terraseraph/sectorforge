@@ -14,12 +14,15 @@ $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $work = Join-Path $env:TEMP "sf-ntfs-fixture"
 $vhd = Join-Path $work "ntfs-small.vhd"
+# A previous failed run can leave the VHD attached, which locks the file.
+if (Test-Path $vhd) { Dismount-DiskImage -ImagePath $vhd -ErrorAction SilentlyContinue | Out-Null }
 Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory $work | Out-Null
 
 "create vdisk file=`"$vhd`" maximum=16 type=fixed`nexit" | Set-Content -Encoding ascii (Join-Path $work "create.txt")
 diskpart /s (Join-Path $work "create.txt") | Out-Null
 Mount-DiskImage -ImagePath $vhd | Out-Null
+try {
 $disk = Get-DiskImage -ImagePath $vhd | Get-Disk
 Initialize-Disk -Number $disk.Number -PartitionStyle MBR
 $part = New-Partition -DiskNumber $disk.Number -UseMaximumSize -AssignDriveLetter
@@ -35,7 +38,8 @@ function Make-Text([string]$tag, [int]$bytes) {
 }
 function Put([string]$rel, [byte[]]$data) {
     $p = Join-Path $root $rel
-    New-Item -ItemType Directory -Force (Split-Path -Parent $p) | Out-Null
+    # New-Item rejects a drive root ("D:\") in Windows PowerShell 5.1; CreateDirectory accepts it.
+    [System.IO.Directory]::CreateDirectory((Split-Path -Parent $p)) | Out-Null
     [System.IO.File]::WriteAllBytes($p, $data)
 }
 
@@ -92,7 +96,10 @@ Remove-Item (Join-Path $root "Pictures\deleted_photo.jpg")
 Remove-Item (Join-Path $root "OldStuff") -Recurse
 
 Write-VolumeCache -DriveLetter $part.DriveLetter
-Dismount-DiskImage -ImagePath $vhd | Out-Null
+} finally {
+    # Always detach, even on failure, so the test volume never lingers as a drive letter.
+    Dismount-DiskImage -ImagePath $vhd -ErrorAction SilentlyContinue | Out-Null
+}
 
 $manifest | ConvertTo-Json -Depth 3 | Set-Content -Encoding utf8 (Join-Path $here "ntfs-small.manifest.json")
 $in = [System.IO.File]::OpenRead($vhd)

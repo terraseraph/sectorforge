@@ -296,7 +296,8 @@ impl<'r, 'a> Ntfs<'r, 'a> {
         let mut ds = DataStream {
             size: first.data_size,
             init_size: first.init_size.min(first.data_size),
-            compressed: first_attr.flags & FLAG_COMPRESSED != 0 || first.compression_unit != 0,
+            // Sparse files also carry a compression unit; only the flag means compressed.
+            compressed: first_attr.flags & FLAG_COMPRESSED != 0,
             encrypted: first_attr.flags & FLAG_ENCRYPTED != 0,
             incomplete: list_incomplete || first.start_vcn != 0,
             ..Default::default()

@@ -33,7 +33,8 @@ $script:checks = 0
 function Fail([string]$msg) { $script:failures++; Write-Host "  FAIL: $msg" -ForegroundColor Red }
 function Check([bool]$cond, [string]$msg) { $script:checks++; if (-not $cond) { Fail $msg } }
 
-# Runs sf-cli in $work (so paths in output are relative) and parses stdout.
+# Runs sf-cli in $work (on the system drive, so the same-drive refusals
+# trigger; relative paths keep local paths out of the samples).
 function Run([string[]]$cliArgs, [int]$expectExit, [string]$sample) {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $cli
@@ -161,7 +162,7 @@ if ($Samples) {
 }
 
 Write-Host "`n== image: refuses outputs on the source drive (device mode, unelevated is fine)"
-$ev = Run @('image', '--source', $systemDrive.path, '--dest', (Join-Path $work 'x.img'), '--map', (Join-Path $work 'x.map'), '--json') 1 'error_image_same_drive'
+$ev = Run @('image', '--source', $systemDrive.path, '--dest', 'x.img', '--map', 'x.map', '--json') 1 'error_image_same_drive'
 Check ($ev[-1].message -match 'source drive') "same-drive refusal message"
 Check (-not (Test-Path (Join-Path $work 'x.map'))) "refusal must happen before anything is created"
 
@@ -178,7 +179,7 @@ Check ($ev[0].event -eq 'start') "carve starts with start"
 Shape $ev[0] $startShape
 Check ($ev[0].mode -eq 'file') "file mode"
 foreach ($p in (Events $ev 'carve_progress')) { Shape $p @{ bytes_scanned = 'int'; bytes_total = 'int'; files_found = 'int' } }
-$found = Events $ev 'file'
+$found = @(Events $ev 'file')
 foreach ($f in $found) { Shape $f @{ offset = 'int'; size = 'int'; type = 'string'; name = 'string'; complete = 'bool' } }
 Check ($found.Count -eq $carveFiles.Count) "carve should find $($carveFiles.Count) files, found $($found.Count)"
 foreach ($cf in $carveFiles) {
@@ -196,7 +197,7 @@ Shape $done @{ files_found = 'int'; bytes_written = 'int' }
 
 Write-Host "`n== carve --map (bad sector inside the PNG) --types png,jpg --start/--end"
 $ev = Run @('carve', '--source', 'carve-disk.img', '--out', 'carved-map', '--map', 'carve-disk.map', '--types', 'png,jpg', '--start', '4096', '--end', '786432', '--json') 0 'carve_map'
-$found = Events $ev 'file'
+$found = @(Events $ev 'file')
 Check (($found | ForEach-Object { $_.type }) -join ',' -eq 'jpg,png') "types filter + range: got $(($found | ForEach-Object { $_.type }) -join ',')"
 $png = $found | Where-Object { $_.type -eq 'png' }
 Check ($png -and -not $png.complete) "PNG overlapping a bad map range must be complete:false"
@@ -219,10 +220,10 @@ $ev = Run @('files', '--source', 'ntfs.vhd', '--partition-lba', "$lba", '--json'
 Check ($ev[0].event -eq 'start') "files starts with start"
 Shape $ev[0] ($startShape + @{ partition_lba = 'int'; filesystem = 'string' })
 Check ($ev[0].filesystem -eq 'ntfs') "filesystem ntfs"
-$prog = Events $ev 'files_progress'
+$prog = @(Events $ev 'files_progress')
 Check ($prog.Count -ge 1) "files_progress emitted"
 foreach ($p in $prog) { Shape $p @{ records_read = 'int'; records_total = 'int' } }
-$files = Events $ev 'file'
+$files = @(Events $ev 'file')
 foreach ($f in $files) {
     Shape $f @{ id = 'int'; parent_id = 'int'; name = 'string'; path = 'string?'; is_dir = 'bool'; size = 'int'; deleted = 'bool'; modified = 'string?'; created = 'string?'; recoverable = 'string' }
     OneOf $f.recoverable @('full', 'partial', 'none') 'recoverable'
@@ -252,7 +253,7 @@ $docs = $byPath['/Documents'].id
 $ev = Run @('extract', '--source', 'ntfs.vhd', '--partition-lba', "$lba", '--ids', "$photo,$docs,4000000", '--out', 'restored', '--json') 0 'extract'
 Shape $ev[0] ($startShape + @{ partition_lba = 'int'; filesystem = 'string' })
 foreach ($p in (Events $ev 'extract_progress')) { Shape $p @{ files_done = 'int'; files_total = 'int'; bytes_done = 'int'; bytes_total = 'int' } }
-$items = Events $ev 'extracted'
+$items = @(Events $ev 'extracted')
 foreach ($i in $items) { Shape $i @{ id = 'int'; path = 'string?'; size = 'int'; complete = 'bool'; note = 'string?' } }
 $pi = $items | Where-Object { $_.id -eq $photo }
 Check ($pi.path -eq 'Pictures/deleted_photo.jpg' -and $pi.complete) "deleted photo extracted to its folder"
@@ -265,13 +266,13 @@ Check ($ev[-1].failed -eq 1) "one failure (the unknown id)"
 $compressed = $byPath['/compressed.txt'].id
 "$compressed`n`n$photo`n" | Set-Content -Encoding ascii (Join-Path $work 'ids.txt')
 $ev = Run @('extract', '--source', 'ntfs.vhd', '--partition-lba', "$lba", '--ids-file', 'ids.txt', '--out', 'restored2', '--json') 0 'extract_ids_file'
-$ci = Events $ev 'extracted' | Where-Object { $_.id -eq $compressed }
+$ci = @(Events $ev 'extracted') | Where-Object { $_.id -eq $compressed }
 Check ($ci -and -not $ci.complete -and $ci.note -match 'compressed') "compressed file flagged complete:false with a note"
 
 $ev = Run @('extract', '--source', 'ntfs.vhd', '--partition-lba', "$lba", '--ids', '1', '--ids-file', 'ids.txt', '--out', 'r3', '--json') 2 $null
 '12x' | Set-Content -Encoding ascii (Join-Path $work 'bad-ids.txt')
 $ev = Run @('extract', '--source', 'ntfs.vhd', '--partition-lba', "$lba", '--ids-file', 'bad-ids.txt', '--out', 'r4', '--json') 1 $null
-$ev = Run @('extract', '--source', $systemDrive.path, '--partition-lba', '2048', '--ids', '5', '--out', (Join-Path $work 'r5'), '--json') 1 $null
+$ev = Run @('extract', '--source', $systemDrive.path, '--partition-lba', '2048', '--ids', '5', '--out', 'r5', '--json') 1 $null
 Check ($ev[-1].message -match 'source drive') "extract refuses --out on the source drive"
 
 Remove-Item $work -Recurse -Force

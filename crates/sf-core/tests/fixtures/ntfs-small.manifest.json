@@ -1,0 +1,93 @@
+﻿[
+    {
+        "path":  "/Documents/report.txt",
+        "size":  300,
+        "sha256":  "aea16356dc7f6020b23075e11672308e226d5509db4aea39e208c78f197170e1",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/Documents/notes/deep/nested.txt",
+        "size":  5000,
+        "sha256":  "ff87ac57e534f888bec7ed539b200fb2bef1cd255e7c91646aa128b7cd59b7a1",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/Pictures/photo.jpg",
+        "size":  200000,
+        "sha256":  "ed6dc01771c9e1a95ad8743a8ffaf36f3136368b3b3c16a8276d03c7b5c54c7f",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/café ünïcode.txt",
+        "size":  1234,
+        "sha256":  "eb7805e9f7e27ca0506ea36a3f687977e16e251ac53cd1f1a28631595b441439",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/A Very Long File Name That Needs A Short Alias.txt",
+        "size":  2100,
+        "sha256":  "d40dabef5ca3a12c7a5f396b56ffa73be9b09e3471e4485fc223039337557c2e",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/fragmented.bin",
+        "size":  327680,
+        "sha256":  "9986d351037d337abc2996903fb9f630933f9da42f88db792a310fda237cb6a0",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/interleave.bin",
+        "size":  327680,
+        "sha256":  "a9a38da8e43df41b8a865ecaa08a2087571234f4074f70722808b01ce3955144",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/Links/target.txt",
+        "size":  4000,
+        "sha256":  "948f1ee1da990e13cf59b72ef8e7e0ef660f3d44b523a498d09d2d43cf1caff2",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/sparse.bin",
+        "size":  1048576,
+        "sha256":  "bc88405b86325957d3bd6adce03782a4f07aedd2610f7262dd7f522966cabbb3",
+        "deleted":  false,
+        "note":  ""
+    },
+    {
+        "path":  "/compressed.txt",
+        "size":  65536,
+        "sha256":  "7d04d45d49a764b5f2763b8466a28129a7611cca51e8024db787327c76c641ed",
+        "deleted":  false,
+        "note":  "ntfs-compressed"
+    },
+    {
+        "path":  "/Pictures/deleted_photo.jpg",
+        "size":  150000,
+        "sha256":  "4761f3646ae868362ac6f083116524802f1ef4f4906fad41009267575f0b7250",
+        "deleted":  true,
+        "note":  ""
+    },
+    {
+        "path":  "/OldStuff/letter.txt",
+        "size":  9000,
+        "sha256":  "8e52fa867e0b0a110e55c543e4b220df9e8546758a0e46b1b4bc03f22e4693e1",
+        "deleted":  true,
+        "note":  ""
+    },
+    {
+        "path":  "/OldStuff/inner/memo.txt",
+        "size":  700,
+        "sha256":  "4fae5850270a6c443e39539a8f7739b4d14d555324611f858d855a1fe729f969",
+        "deleted":  true,
+        "note":  ""
+    }
+]

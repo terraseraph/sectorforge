@@ -1,0 +1,5 @@
+{"event":"start","mode":"file","sector_size":512,"size":2097152,"source":"carve-disk.img"}
+{"complete":true,"event":"file","name":"jpg/f0000128.jpg","offset":65536,"size":3286,"type":"jpg"}
+{"complete":false,"event":"file","name":"png/f0000512.png","offset":262144,"size":19821,"type":"png"}
+{"bytes_scanned":782336,"bytes_total":782336,"event":"carve_progress","files_found":2}
+{"bytes_written":23107,"event":"done","files_found":2}
