@@ -686,7 +686,7 @@ mod tests {
         assert!(needs_private_copy(Path::new("/tmp/.mount_zzz/usr/bin/sf-cli"), None)); // mount seen without APPDIR
         assert!(!needs_private_copy(Path::new("/usr/bin/sf-cli"), Some(&ap)));
         assert!(!needs_private_copy(Path::new("/usr/bin/sf-cli"), None));
-        assert_eq!(private_dir(Some("/run/user/1000".into()), 1, 2).to_string_lossy().replace('\', "/"), "/run/user/1000/sectorforge");
+        assert_eq!(private_dir(Some("/run/user/1000".into()), 1, 2).to_string_lossy().replace("\\", "/"), "/run/user/1000/sectorforge");
         assert_eq!(private_dir(Some("".into()), 7, 9), PathBuf::from("/tmp/sectorforge-7-9"));
         assert_eq!(private_dir(None, 7, 9), PathBuf::from("/tmp/sectorforge-7-9"));
         let t = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
