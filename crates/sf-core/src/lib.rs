@@ -7,10 +7,12 @@ pub mod block_device;
 pub mod device;
 pub mod imager;
 pub mod mapfile;
+pub mod partitions;
 
 pub use block_device::BlockDevice;
 pub use imager::{Imager, ImagerConfig, Progress};
 pub use mapfile::{Block, MapFile, Status};
+pub use partitions::{Confidence, FsKind, PartitionInfo, PartitionSource, ScanResult, TableKind};
 
 use std::io;
 

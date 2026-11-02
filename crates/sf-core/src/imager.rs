@@ -5,6 +5,8 @@
 //! [`MapFile`] so a run can be stopped and resumed at any point.
 
 use std::io::{self, Seek, SeekFrom, Write};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::aligned_buf::AlignedBuf;
 use crate::block_device::BlockDevice;
@@ -47,6 +49,8 @@ pub struct Imager<D: BlockDevice, W: Write + Seek> {
     dest: W,
     map: MapFile,
     config: ImagerConfig,
+    checkpoint: Option<(PathBuf, Duration)>,
+    last_checkpoint: Instant,
 }
 
 impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
@@ -56,7 +60,31 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
             dest,
             map,
             config,
+            checkpoint: None,
+            last_checkpoint: Instant::now(),
         }
+    }
+
+    /// Saves the map to `path` at least every `interval` while a pass runs,
+    /// and at the end of every pass, so killing the process loses at most
+    /// `interval` worth of progress.
+    pub fn with_checkpoint(mut self, path: impl Into<PathBuf>, interval: Duration) -> Self {
+        self.checkpoint = Some((path.into(), interval));
+        self
+    }
+
+    fn checkpoint(&mut self, force: bool) -> io::Result<()> {
+        let Some((path, interval)) = &self.checkpoint else {
+            return Ok(());
+        };
+        if !force && self.last_checkpoint.elapsed() < *interval {
+            return Ok(());
+        }
+        // Image data must reach the OS before the map claims it's rescued.
+        self.dest.flush()?;
+        self.map.save(path)?;
+        self.last_checkpoint = Instant::now();
+        Ok(())
     }
 
     pub fn map(&self) -> &MapFile {
@@ -73,7 +101,7 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
         self.map.save(path)
     }
 
-    fn progress(&self) -> Progress {
+    pub fn progress(&self) -> Progress {
         let total = self.map.size();
         Progress {
             current_pos: self.map.current_pos,
@@ -128,9 +156,10 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
 
             self.map.current_pos = pos;
             self.map.current_status = Status::NonTried;
+            self.checkpoint(false)?;
             on_progress(self.progress());
         }
-        Ok(())
+        self.checkpoint(true)
     }
 
     /// Phase 2: for every region the first pass couldn't read, binary-split
@@ -147,39 +176,52 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
             else {
                 break;
             };
-            self.split_and_retry(pos, len, sector, 0)?;
-            on_progress(self.progress());
+            self.split_and_retry(pos, len, sector, 0, &mut on_progress)?;
         }
-        Ok(())
+        self.checkpoint(true)
     }
 
-    fn split_and_retry(&mut self, pos: u64, len: u64, sector: u64, attempt: u32) -> io::Result<()> {
+    fn split_and_retry(
+        &mut self,
+        pos: u64,
+        len: u64,
+        sector: u64,
+        attempt: u32,
+        on_progress: &mut dyn FnMut(Progress),
+    ) -> io::Result<()> {
         let mut buf = AlignedBuf::new(len as usize, sector as usize);
-        match self.device.read_at(pos, &mut buf) {
+        let outcome = match self.device.read_at(pos, &mut buf) {
             Ok(()) => {
                 self.write_chunk(pos, &buf)?;
-                self.map.mark(pos, len, Status::Finished);
-                return Ok(());
+                Some(Status::Finished)
             }
-            Err(_) => {
-                if len <= sector {
-                    if attempt + 1 < self.config.max_retries {
-                        return self.split_and_retry(pos, len, sector, attempt + 1);
-                    }
-                    self.map.mark(pos, len, Status::BadSector);
-                    return Ok(());
+            Err(_) if len <= sector => {
+                if attempt + 1 < self.config.max_retries {
+                    return self.split_and_retry(pos, len, sector, attempt + 1, on_progress);
                 }
+                Some(Status::BadSector)
             }
+            Err(_) => None,
+        };
+
+        if let Some(status) = outcome {
+            self.map.mark(pos, len, status);
+            self.map.current_pos = pos + len;
+            // Each failed read on a dying drive can take seconds, so one
+            // damaged region can run for hours — checkpoint and report
+            // inside it, not just between regions.
+            self.checkpoint(false)?;
+            on_progress(self.progress());
+            return Ok(());
         }
 
         // Split into two halves, aligned to the sector size, and retry each
         // independently — isolates the damage instead of giving up on the
         // whole chunk.
-        let half = align_chunk_len(len / 2, sector).max(sector);
-        let half = half.min(len - sector); // leave at least one sector for the second half
+        let half = align_chunk_len(len / 2, sector).min(len - sector);
         self.map.mark(pos, len, Status::NonScraped);
-        self.split_and_retry(pos, half, sector, 0)?;
-        self.split_and_retry(pos + half, len - half, sector, 0)
+        self.split_and_retry(pos, half, sector, 0, on_progress)?;
+        self.split_and_retry(pos + half, len - half, sector, 0, on_progress)
     }
 }
 
@@ -252,6 +294,35 @@ mod tests {
         assert_eq!(map.bytes_with_status(Status::NonTried), 0);
         assert_eq!(map.bytes_with_status(Status::NonTrimmed), 0);
         assert_eq!(map.bytes_with_status(Status::NonScraped), 0);
+    }
+
+    #[test]
+    fn checkpoints_mid_pass_so_a_killed_run_can_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let map_path = dir.path().join("run.map");
+        let config = ImagerConfig {
+            initial_chunk: 1024,
+            skip_size: 1024,
+            max_retries: 1,
+        };
+        let mut imager = Imager::new(make_device(8192, 512), Cursor::new(vec![0u8; 8192]), MapFile::new_non_tried(8192), config)
+            .with_checkpoint(&map_path, Duration::ZERO);
+
+        // Simulate the process being killed partway through pass 1: observe
+        // the on-disk map from inside the progress callback, before the
+        // pass's final checkpoint.
+        let mut seen_mid_pass = None;
+        imager
+            .run_copy_pass(|p| {
+                if p.bytes_rescued == 4096 {
+                    seen_mid_pass = Some(MapFile::load(&map_path).unwrap());
+                }
+            })
+            .unwrap();
+
+        let mid = seen_mid_pass.expect("callback saw the halfway point");
+        assert_eq!(mid.bytes_with_status(Status::Finished), 4096);
+        assert_eq!(mid.current_pos, 4096);
     }
 
     #[test]

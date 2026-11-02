@@ -1,44 +1,57 @@
+//! sf-cli: the SectorForge engine as a command-line tool. With `--json` it
+//! speaks the NDJSON contract in `docs/cli-contract.md`, which is how the GUI
+//! drives it.
+
 use std::fs::OpenOptions;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
-use sf_core::{BlockDevice, Imager, ImagerConfig, MapFile, Progress, Status};
+use serde_json::{json, Value};
+use sf_core::partitions;
+use sf_core::{BlockDevice, Confidence, FsKind, Imager, ImagerConfig, MapFile, PartitionSource, Progress, Status, TableKind};
+
+const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
 #[derive(Parser)]
 #[command(name = "sf-cli", about = "SectorForge command-line imaging engine", version)]
 struct Cli {
+    /// Emit newline-delimited JSON events on stdout (see docs/cli-contract.md).
+    #[arg(long, global = true)]
+    json: bool,
+
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
-    /// Clone a raw device sector-by-sector into an image file, retrying and
+    /// Clone a device sector-by-sector into an image file, retrying and
     /// isolating bad sectors instead of giving up on the whole run.
     Image {
-        /// Source device path, e.g. \\.\PhysicalDrive1 (Windows) or /dev/sdb (Linux)
+        /// Source: \\.\PhysicalDrive1 (Windows) or /dev/sdb (Linux) for
+        /// direct hardware access, or any file path for image-file mode.
         #[arg(long)]
         source: String,
         /// Destination image file.
         #[arg(long)]
         dest: PathBuf,
-        /// Mapfile tracking progress — created if missing, reused to resume
-        /// an interrupted run.
+        /// Mapfile tracking progress — created if missing, reused to resume.
         #[arg(long)]
         map: PathBuf,
         /// Read size (bytes) on the fast first pass.
         #[arg(long, default_value_t = 1024 * 1024)]
         chunk_size: u64,
-        /// How far to jump past a chunk that failed to read, before
-        /// continuing the first pass.
+        /// How far to jump past a chunk that failed to read.
         #[arg(long, default_value_t = 1024 * 1024)]
         skip_size: u64,
-        /// Retries per sector before giving up on it as bad.
+        /// Attempts per sector before giving up on it as bad.
         #[arg(long, default_value_t = 3)]
         retries: u32,
-        /// Skip the fast first pass and go straight to retrying
-        /// already-known damaged regions from a previous run.
+        /// Skip the fast first pass; only retry known-damaged regions.
         #[arg(long)]
         retry_only: bool,
     },
@@ -47,34 +60,153 @@ enum Command {
         #[arg(long)]
         map: PathBuf,
     },
+    /// Detect partitions and filesystems on a device or image.
+    Scan {
+        #[arg(long)]
+        source: String,
+        /// Also scan the whole device for filesystem signatures, to find
+        /// partitions missing from (or deleted from) the partition table.
+        #[arg(long)]
+        deep: bool,
+    },
 }
 
-/// `\\.\PhysicalDrive1`, `\\.\PhysicalDrive1\` etc. (Windows) or `/dev/sdb`
-/// (Linux) mean "direct hardware access"; anything else is treated as
-/// "image file" mode — a plain file, usually an existing disk image.
-fn looks_like_raw_device_path(path: &str) -> bool {
+/// Where output goes: human text, or one JSON object per stdout line.
+#[derive(Clone, Copy)]
+struct Out {
+    json: bool,
+}
+
+impl Out {
+    fn event(self, value: Value) {
+        if self.json {
+            let mut stdout = io::stdout().lock();
+            let _ = writeln!(stdout, "{value}");
+            let _ = stdout.flush();
+        }
+    }
+
+    /// Human-readable line; goes to stderr in JSON mode so stdout stays
+    /// pure NDJSON.
+    fn say(self, text: impl AsRef<str>) {
+        if self.json {
+            eprintln!("{}", text.as_ref());
+        } else {
+            println!("{}", text.as_ref());
+        }
+    }
+}
+
+struct Throttle {
+    last: Option<Instant>,
+}
+
+impl Throttle {
+    fn new() -> Self {
+        Self { last: None }
+    }
+
+    fn ready(&mut self) -> bool {
+        if self.last.is_some_and(|t| t.elapsed() < PROGRESS_INTERVAL) {
+            return false;
+        }
+        self.last = Some(Instant::now());
+        true
+    }
+}
+
+/// `\\.\…` (Windows) or `/dev/…` (Linux) means direct hardware access;
+/// anything else is opened as a plain file (image-file mode).
+fn is_raw_device_path(path: &str) -> bool {
     path.starts_with(r"\\.\") || path.starts_with("/dev/")
 }
 
-fn open_device(path: &str) -> io::Result<Box<dyn BlockDevice>> {
-    if looks_like_raw_device_path(path) {
+fn open_device(path: &str) -> anyhow::Result<Box<dyn BlockDevice>> {
+    open_device_inner(path).map_err(|e| {
+        if e.kind() == io::ErrorKind::PermissionDenied && is_raw_device_path(path) {
+            anyhow::anyhow!(
+                "access denied opening {path}: direct hardware access needs Administrator (Windows) or root (Linux)"
+            )
+        } else {
+            anyhow::anyhow!("cannot open source {path}: {e}")
+        }
+    })
+}
+
+fn open_device_inner(path: &str) -> io::Result<Box<dyn BlockDevice>> {
+    if is_raw_device_path(path) {
         #[cfg(windows)]
-        {
-            return Ok(Box::new(sf_core::device::WindowsPhysicalDrive::open(path)?));
-        }
+        return Ok(Box::new(sf_core::device::WindowsPhysicalDrive::open(path)?));
         #[cfg(target_os = "linux")]
-        {
-            return Ok(Box::new(sf_core::device::LinuxBlockDevice::open(path)?));
-        }
+        return Ok(Box::new(sf_core::device::LinuxBlockDevice::open(path)?));
         #[cfg(not(any(windows, target_os = "linux")))]
-        {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "no raw device backend for this platform yet",
-            ));
-        }
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "no raw device backend for this platform yet"));
     }
     Ok(Box::new(sf_core::device::FileBlockDevice::open(path, 512)?))
+}
+
+fn mode_name(path: &str) -> &'static str {
+    if is_raw_device_path(path) {
+        "device"
+    } else {
+        "file"
+    }
+}
+
+fn status_name(s: Status) -> &'static str {
+    match s {
+        Status::NonTried => "non_tried",
+        Status::NonTrimmed => "non_trimmed",
+        Status::NonScraped => "non_scraped",
+        Status::BadSector => "bad_sector",
+        Status::Finished => "finished",
+    }
+}
+
+fn fs_name(f: FsKind) -> &'static str {
+    match f {
+        FsKind::Ntfs => "ntfs",
+        FsKind::Fat12 => "fat12",
+        FsKind::Fat16 => "fat16",
+        FsKind::Fat32 => "fat32",
+        FsKind::ExFat => "exfat",
+        FsKind::Ext => "ext",
+        FsKind::Unknown => "unknown",
+    }
+}
+
+fn confidence_name(c: Confidence) -> &'static str {
+    match c {
+        Confidence::Confident => "confident",
+        Confidence::Rebuilt => "rebuilt",
+        Confidence::LowConfidence => "low_confidence",
+    }
+}
+
+fn source_name(s: PartitionSource) -> &'static str {
+    match s {
+        PartitionSource::Mbr => "mbr",
+        PartitionSource::Gpt => "gpt",
+        PartitionSource::SignatureScan => "signature_scan",
+    }
+}
+
+fn table_name(t: TableKind) -> &'static str {
+    match t {
+        TableKind::Mbr => "mbr",
+        TableKind::Gpt => "gpt",
+        TableKind::None => "none",
+    }
+}
+
+fn totals_json(m: &MapFile) -> Value {
+    json!({
+        "finished": m.bytes_with_status(Status::Finished),
+        "bad_sector": m.bytes_with_status(Status::BadSector),
+        "non_trimmed": m.bytes_with_status(Status::NonTrimmed),
+        "non_scraped": m.bytes_with_status(Status::NonScraped),
+        "non_tried": m.bytes_with_status(Status::NonTried),
+    })
 }
 
 fn format_bytes(b: u64) -> String {
@@ -85,85 +217,212 @@ fn format_bytes(b: u64) -> String {
         v /= 1024.0;
         u += 1;
     }
-    format!("{:.2} {}", v, UNITS[u])
+    format!("{v:.2} {}", UNITS[u])
 }
 
-fn print_progress(p: Progress) {
-    let pct = if p.bytes_total > 0 {
-        100.0 * (p.bytes_rescued + p.bytes_bad) as f64 / p.bytes_total as f64
+fn report_progress(out: Out, pass: u32, p: Progress) {
+    if out.json {
+        out.event(json!({
+            "event": "progress",
+            "pass": pass,
+            "current_pos": p.current_pos,
+            "bytes_total": p.bytes_total,
+            "bytes_rescued": p.bytes_rescued,
+            "bytes_bad": p.bytes_bad,
+            "bytes_pending": p.bytes_pending,
+        }));
     } else {
-        0.0
-    };
-    print!(
-        "\r{pct:>6.2}%  rescued {:<12} bad {:<10} pending {:<12} pos 0x{:X}        ",
-        format_bytes(p.bytes_rescued),
-        format_bytes(p.bytes_bad),
-        format_bytes(p.bytes_pending),
-        p.current_pos
-    );
-    let _ = io::stdout().flush();
+        let pct = if p.bytes_total > 0 {
+            100.0 * (p.bytes_rescued + p.bytes_bad) as f64 / p.bytes_total as f64
+        } else {
+            0.0
+        };
+        print!(
+            "\r{pct:>6.2}%  rescued {:<12} bad {:<10} pending {:<12} pos 0x{:X}    ",
+            format_bytes(p.bytes_rescued),
+            format_bytes(p.bytes_bad),
+            format_bytes(p.bytes_pending),
+            p.current_pos
+        );
+        let _ = io::stdout().flush();
+    }
 }
 
-fn print_status(m: &MapFile) {
+fn print_status_human(m: &MapFile) {
     println!("Map size: {}", format_bytes(m.size()));
-    println!("  Finished:     {}", format_bytes(m.bytes_with_status(Status::Finished)));
-    println!("  Bad sectors:  {}", format_bytes(m.bytes_with_status(Status::BadSector)));
-    println!("  Non-trimmed:  {}", format_bytes(m.bytes_with_status(Status::NonTrimmed)));
-    println!("  Non-scraped:  {}", format_bytes(m.bytes_with_status(Status::NonScraped)));
-    println!("  Non-tried:    {}", format_bytes(m.bytes_with_status(Status::NonTried)));
+    for s in [Status::Finished, Status::BadSector, Status::NonTrimmed, Status::NonScraped, Status::NonTried] {
+        println!("  {:<12} {}", status_name(s), format_bytes(m.bytes_with_status(s)));
+    }
 }
 
-fn run_image(
-    source: &str,
-    dest: &PathBuf,
-    map_path: &PathBuf,
+struct ImageArgs {
+    source: String,
+    dest: PathBuf,
+    map: PathBuf,
     chunk_size: u64,
     skip_size: u64,
     retries: u32,
     retry_only: bool,
-) -> anyhow::Result<()> {
-    let device = open_device(source)?;
-    let size = device.size_bytes();
+}
 
-    let map = if map_path.exists() {
-        println!("Resuming from existing map {}", map_path.display());
-        MapFile::load(map_path)?
+fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
+    let device = open_device(&a.source)?;
+    let size = device.size_bytes();
+    let sector_size = device.sector_size();
+
+    let resumed = a.map.exists();
+    let map = if resumed {
+        let m = MapFile::load(&a.map)?;
+        anyhow::ensure!(
+            m.size() == size,
+            "mapfile {} is for a {}-byte device, but the source is {} bytes — wrong map for this source?",
+            a.map.display(),
+            m.size(),
+            size
+        );
+        out.say(format!("Resuming from existing map {}", a.map.display()));
+        m
     } else {
-        println!("Starting new map for {source} ({})", format_bytes(size));
+        out.say(format!("Starting new map for {} ({})", a.source, format_bytes(size)));
         let m = MapFile::new_non_tried(size);
-        m.save(map_path)?;
+        m.save(&a.map)?;
         m
     };
 
-    let dest_file = OpenOptions::new().write(true).create(true).open(dest)?;
+    out.event(json!({
+        "event": "start",
+        "source": a.source,
+        "mode": mode_name(&a.source),
+        "size": size,
+        "sector_size": sector_size,
+        "resumed": resumed,
+    }));
+
+    let dest_file = OpenOptions::new().write(true).create(true).truncate(false).open(&a.dest)?;
     dest_file.set_len(size)?;
 
     let config = ImagerConfig {
-        initial_chunk: chunk_size,
-        skip_size,
-        max_retries: retries,
+        initial_chunk: a.chunk_size,
+        skip_size: a.skip_size,
+        max_retries: a.retries,
     };
-    let mut imager = Imager::new(device, dest_file, map, config);
+    let mut imager = Imager::new(device, dest_file, map, config).with_checkpoint(&a.map, CHECKPOINT_INTERVAL);
 
-    if !retry_only {
-        println!("\nPass 1: fast copy, skipping past damage");
-        imager.run_copy_pass(print_progress)?;
-        imager.save_map(map_path)?;
-        println!();
+    let passes: &[(u32, &str)] = if a.retry_only { &[(2, "retry")] } else { &[(1, "copy"), (2, "retry")] };
+    for &(pass, name) in passes {
+        out.event(json!({"event": "pass_start", "pass": pass, "name": name}));
+        if !out.json {
+            println!("\nPass {pass}: {}", if pass == 1 { "fast copy, skipping past damage" } else { "retrying damaged regions sector-by-sector" });
+        }
+        let mut throttle = Throttle::new();
+        let on_progress = |p: Progress| {
+            if throttle.ready() {
+                report_progress(out, pass, p);
+            }
+        };
+        if pass == 1 {
+            imager.run_copy_pass(on_progress)?;
+        } else {
+            imager.run_retry_pass(on_progress)?;
+        }
+        report_progress(out, pass, imager.progress());
+        out.event(json!({"event": "pass_complete", "pass": pass}));
+        if !out.json {
+            println!();
+        }
     }
 
-    println!("Pass 2: retrying damaged regions sector-by-sector");
-    imager.run_retry_pass(print_progress)?;
-    imager.save_map(map_path)?;
-    println!();
-
-    print_status(imager.map());
+    out.event(json!({"event": "done", "totals": totals_json(imager.map())}));
+    if !out.json {
+        print_status_human(imager.map());
+    }
     Ok(())
 }
 
-fn main() -> anyhow::Result<()> {
+fn run_status(out: Out, map_path: &PathBuf) -> anyhow::Result<()> {
+    let m = MapFile::load(map_path)?;
+    if out.json {
+        let blocks: Vec<Value> = m
+            .blocks()
+            .iter()
+            .map(|b| json!({"pos": b.pos, "size": b.size, "status": status_name(b.status)}))
+            .collect();
+        out.event(json!({
+            "event": "status",
+            "size": m.size(),
+            "current_pos": m.current_pos,
+            "totals": totals_json(&m),
+            "blocks": blocks,
+        }));
+    } else {
+        print_status_human(&m);
+    }
+    Ok(())
+}
+
+fn run_scan(out: Out, source: &str, deep: bool) -> anyhow::Result<()> {
+    let mut device = open_device(source)?;
+    let size = device.size_bytes();
+    out.event(json!({
+        "event": "start",
+        "source": source,
+        "mode": mode_name(source),
+        "size": size,
+        "sector_size": device.sector_size(),
+    }));
+
+    let mut throttle = Throttle::new();
+    let result = partitions::scan(&mut device, deep, |done, total| {
+        if done == total || throttle.ready() {
+            if out.json {
+                out.event(json!({"event": "scan_progress", "bytes_scanned": done, "bytes_total": total}));
+            } else {
+                eprint!("\rSignature scan: {:>6.2}%", 100.0 * done as f64 / total.max(1) as f64);
+            }
+        }
+    })?;
+
+    if out.json {
+        let parts: Vec<Value> = result
+            .partitions
+            .iter()
+            .map(|p| {
+                json!({
+                    "start_lba": p.start_bytes / 512,
+                    "size_sectors": p.size_bytes.map(|s| s / 512),
+                    "filesystem": fs_name(p.filesystem),
+                    "confidence": confidence_name(p.confidence),
+                    "source": source_name(p.source),
+                    "label": p.label,
+                })
+            })
+            .collect();
+        out.event(json!({"event": "result", "table_kind": table_name(result.table_kind), "partitions": parts}));
+    } else {
+        eprintln!();
+        println!("Partition table: {}", table_name(result.table_kind));
+        if result.partitions.is_empty() {
+            println!("No partitions or filesystems found.");
+        }
+        for (i, p) in result.partitions.iter().enumerate() {
+            println!(
+                "  #{i}  {:<8} start LBA {:<12} size {:<12} {:<15} via {}{}",
+                fs_name(p.filesystem),
+                p.start_bytes / 512,
+                p.size_bytes.map(format_bytes).unwrap_or_else(|| "unknown".into()),
+                confidence_name(p.confidence),
+                source_name(p.source),
+                p.label.as_ref().map(|l| format!("  \"{l}\"")).unwrap_or_default(),
+            );
+        }
+    }
+    Ok(())
+}
+
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    match cli.command {
+    let out = Out { json: cli.json };
+    let result = match cli.command {
         Command::Image {
             source,
             dest,
@@ -172,11 +431,31 @@ fn main() -> anyhow::Result<()> {
             skip_size,
             retries,
             retry_only,
-        } => run_image(&source, &dest, &map, chunk_size, skip_size, retries, retry_only)?,
-        Command::Status { map } => {
-            let m = MapFile::load(&map)?;
-            print_status(&m);
+        } => run_image(
+            out,
+            ImageArgs {
+                source,
+                dest,
+                map,
+                chunk_size,
+                skip_size,
+                retries,
+                retry_only,
+            },
+        ),
+        Command::Status { map } => run_status(out, &map),
+        Command::Scan { source, deep } => run_scan(out, &source, deep),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            if out.json {
+                out.event(json!({"event": "error", "message": format!("{e:#}")}));
+            } else {
+                eprintln!("\nerror: {e:#}");
+            }
+            ExitCode::from(1)
         }
     }
-    Ok(())
 }

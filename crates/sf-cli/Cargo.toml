@@ -13,3 +13,4 @@ path = "src/main.rs"
 sf-core = { path = "../sf-core" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+serde_json = "1"

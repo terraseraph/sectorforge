@@ -13,8 +13,8 @@ it runs.
 
 ## Status
 
-Early. The imaging engine (`sf-core`) and its CLI (`sf-cli`) are working and
-tested. Partition detection, file carving, and the GUI are not built yet.
+Early. Working and tested: the imaging engine, partition detection, and the
+CLI with a JSON mode. In progress: the GUI. Not started: file carving.
 
 ## Layout
 
@@ -34,8 +34,16 @@ tested. Partition detection, file carving, and the GUI are not built yet.
   - `imager.rs` — two-pass algorithm: a fast forward sweep that skips past
     damage to maximize rescued data quickly, then a retry pass that
     binary-splits damaged regions down to the individual sectors that are
-    actually bad.
-- `crates/sf-cli` — CLI wrapping the engine.
+    actually bad. Checkpoints the map every 5 s, so killing it loses at most
+    5 s of progress.
+  - `partitions.rs` — MBR (including extended/logical), GPT (CRC-checked,
+    falls back to the backup header), filesystems with no partition table,
+    and a signature scan that finds NTFS / FAT12/16/32 / exFAT / ext2-4
+    volumes when the table is damaged, or that it no longer lists.
+- `crates/sf-cli` — CLI wrapping the engine. `--json` emits the NDJSON
+  contract in [`docs/cli-contract.md`](docs/cli-contract.md), which is how the
+  GUI drives it.
+- `gui/` — Tauri desktop app; runs `sf-cli --json` as a child process.
 
 ## Using the CLI
 
@@ -49,7 +57,13 @@ sf-cli image --source C:\path\to\source.img --dest C:\path\to\clone.img --map C:
 
 # Check progress on a mapfile at any time:
 sf-cli status --map E:\image.map
+
+# Find partitions on the image (add --deep to also hunt for deleted or
+# unlisted ones by filesystem signature — reads the whole image):
+sf-cli scan --source E:\image.img
 ```
+
+Add `--json` to any command for machine-readable output.
 
 Any source path starting with `\\.\` (Windows) or `/dev/` (Linux) is treated
 as a raw device (direct hardware access); anything else is opened as a plain
@@ -69,10 +83,15 @@ plus a resume check) has been run manually; it isn't automated yet.
 
 ## Known gaps / next steps
 
-- Linux raw device backend is unverified on real hardware.
+- Neither raw device backend has read real hardware yet. The Windows one has
+  been checked only as far as refusing access without Administrator. The Linux
+  one hasn't been run at all.
+- MBR offsets assume 512-byte sectors (normal for MBR disks; native-4K drives
+  use GPT, which handles any sector size).
+- The signature scan skips a whole 4 MiB chunk if any read in it fails, so on
+  a failing *device* it can miss a filesystem that starts in that chunk.
+  Scanning the cloned image avoids this.
+- Map checkpoints survive the process being killed, but not a power cut
+  (the destination file isn't fsynced).
 - No `--reverse` (read backward) retry direction yet, unlike ddrescue.
-- No sparse-file preallocation on the destination image.
-- No partition table / filesystem detection yet (MBR/GPT, NTFS/FAT/exFAT/ext*).
-- No file carving / deep recovery yet.
-- No GUI yet (planned: Tauri, reusing `sf-core` directly — see the design
-  mockup artifact from project planning).
+- No file carving / file-level recovery yet.

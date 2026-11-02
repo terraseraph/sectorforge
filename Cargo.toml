@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/sf-core", "crates/sf-cli"]
+exclude = ["gui"]
 
 [workspace.package]
 version = "0.1.0"
