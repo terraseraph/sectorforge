@@ -17,6 +17,11 @@ Windows and Linux as a portable app: no installer.
 > things worse. Don't install anything onto it, and don't run repair tools
 > (chkdsk, fsck) on it. Copy it first with SectorForge, then recover from the
 > copy.
+>
+> A healthy drive (for example, one with accidentally deleted files) can be
+> recovered from directly, live: pick it as the source on the Recover screen,
+> or pass `\\.\PhysicalDriveN` / `/dev/sdX` to `scan`, `files`, `extract` and
+> `carve`. Save recovered files to a different drive.
 
 ## Download
 

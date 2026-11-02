@@ -1,4 +1,4 @@
-import type { Partition } from "./contract.ts";
+import type { Partition } from "./contract";
 
 const SECTOR = 512; // *_lba / *_sectors fields are always 512-byte units
 

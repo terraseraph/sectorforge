@@ -1,6 +1,6 @@
 // Development only: stands in for the Rust side when the page runs in a plain browser
 // (`npm run dev`, no Tauri window), so layout and the million-entry list can be checked.
-// Never imported by production builds (see the DEV guard in main.ts).
+// Never imported by production builds (see the DEV guard in main.tsx).
 // Query options: ?cli=missing|old  ?elevated=1  ?n=<number of files to list>
 const q = new URLSearchParams(location.search);
 const callbacks = new Map<number, (e: unknown) => void>();
@@ -23,10 +23,6 @@ const partitions = [
   { start_lba: 2048, size_sectors: 1447256064, filesystem: "ntfs", confidence: "confident", source: "mbr", label: null },
   { start_lba: 1447258112, size_sectors: null, filesystem: "fat32", confidence: "rebuilt", source: "signature_scan", label: "<b>USB</b>" },
 ];
-
-function stream(job: string, run: () => void) {
-  run();
-}
 
 function listFiles() {
   const total = Number(q.get("n") ?? 1_200_000);
@@ -82,7 +78,8 @@ function handle(cmd: string, args: Record<string, any>): unknown {
   switch (cmd) {
     case "plugin:event|listen": { const id = nextId++; const l = listeners.get(args.event) ?? []; l.push(args.handler); listeners.set(args.event, l); return id; }
     case "plugin:event|unlisten": return null;
-    case "plugin:dialog|ask": return true;
+    // plugin-dialog 2.8: ask()/confirm() send `message` and compare the answer with the OK label.
+    case "plugin:dialog|message": return args.buttons?.ok ?? "Yes";
     case "plugin:dialog|open": return args.options?.directory ? "D:\\Recovered" : "E:\\image.img";
     case "plugin:dialog|save": return "E:\\rescue\\disk.img";
     case "startup_restore": return null;
@@ -100,7 +97,7 @@ function handle(cmd: string, args: Record<string, any>): unknown {
     case "start_scan":
       setTimeout(() => { ev("scan", { event: "start", source: args.source, mode: "file", size: 2000398934016, sector_size: 512 }); ev("scan", { event: "result", table_kind: "mbr", partitions }); exit("scan", 0); }, 300);
       return null;
-    case "start_files": stream("files", listFiles); return null;
+    case "start_files": listFiles(); return null;
     case "start_extract": extract(args.a); return null;
     case "start_carve": carve(); return null;
     case "stop_files": case "stop_extract": case "stop_carve": {

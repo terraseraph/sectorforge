@@ -1,4 +1,4 @@
-import type { FileRow, Recoverable } from "./contract.ts";
+import type { FileRow, Recoverable } from "./contract";
 
 /** Pseudo-folder holding files whose parent chain is broken (`path: null`). */
 export const ORPHANS = ":orphans:"; // real folder keys always start with "/", so this cannot collide

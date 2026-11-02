@@ -1,8 +1,18 @@
 {
   "compilerOptions": {
-    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
-    "strict": true, "lib": ["ES2022", "DOM"], "noEmit": true, "skipLibCheck": true,
-    "allowImportingTsExtensions": true, "types": []
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["vite/client", "node", "@testing-library/jest-dom"]
   },
-  "include": ["src"], "exclude": ["src/*.test.ts"]
+  "include": ["src", "vite.config.ts"]
 }

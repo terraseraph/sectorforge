@@ -1,5 +1,5 @@
 // Types for the sf-cli NDJSON contract (docs/cli-contract.md, v2).
-import type { Block } from "./map.ts";
+import type { Block } from "./map";
 
 export interface Totals { finished: number; bad_sector: number; non_trimmed: number; non_scraped: number; non_tried: number }
 export interface Partition { start_lba: number; size_sectors: number | null; filesystem: string; confidence: string; source: string; label: string | null }

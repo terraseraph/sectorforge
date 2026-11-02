@@ -1,6 +1,6 @@
 # SectorForge GUI
 
-Tauri 2 + plain TypeScript/Vite. The GUI never links `sf-core`; it spawns `sf-cli --json` and parses NDJSON (see `../docs/cli-contract.md`, contract v2).
+Tauri 2 + React 19 + TypeScript (strict), built with Vite. Behaviour is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The GUI never links `sf-core`; it spawns `sf-cli --json` and parses NDJSON (see `../docs/cli-contract.md`, contract v2).
 
 Screens: **Image** (drive picker, live health map), **Partitions** (drive picker, scan), **Recover** (browse and extract files from NTFS including deleted ones, or carve by file signature).
 
@@ -81,17 +81,18 @@ npm run tauri -- build --bundles appimage  # gui/src-tauri/target/release/bundle
 
 - `src-tauri/src/cli.rs` - typed `Event` enum (all v2 events), line parser, sf-cli lookup, pkexec wrapping, process spawn/kill, unit tests
 - `src-tauri/src/lib.rs` - Tauri commands (`start_*`/`stop_*` for image, scan, carve, files, extract; `cli_info`, `list_devices`, `list_types`, `restart_as_admin`, `startup_restore`); `file` events are batched (2000 or 80 ms) into `sf-files`; other events go as `sf-event`; process end as `sf-exit`
-- `src/main.ts` - shell, version banner, Image and Partitions screens, event routing
-- `src/picker.ts` - drive picker and elevation notice; `src/devices.ts` - drive helpers
-- `src/recover.ts` - Recover screen; `src/filestore.ts` - column store, folder tree from paths, filters; `src/vlist.ts` + `src/virtual.ts` - virtualized list and its windowing math; `src/recoverlogic.ts` - map/partition helpers
-- `src/map.ts` - blocks to health-map cells (worst status per cell)
-- `src/devmock.ts` - browser-only stand-in for the Rust side (dev builds only)
+- `src/main.tsx` - boot: dev mock (browser only), event bridge, settings restored after elevation, first render
+- `src/lib/` - framework-free logic: `api.ts` (typed Tauri commands and dialogs), `contract.ts` (event types), `filestore.ts` (column store for million-entry listings), `map.ts` (blocks to health-map cells), `devices.ts`, `recoverlogic.ts`, `format.ts`
+- `src/store/` - zustand stores (`app`, `image`, `scan`, `recover`), `actions.ts` (everything the UI can do; sets "running" before invoking, rolls back on rejection), `events.ts` (sf-cli events to state), `bridge.ts` (event subscriptions, started once outside React)
+- `src/components/` - shell (nav, sf-cli banner, status bar, error alert), `DrivePicker`, `HealthMap`, `VirtualList` (TanStack Virtual), `ui.tsx` primitives
+- `src/screens/` - `ImageScreen`, `PartitionsScreen`, `recover/` (`RecoverScreen`, `FilesTab`, `FileBrowser`, `ExtractPanel`, `CarveTab`)
+- `src/dev/devmock.ts` - browser-only stand-in for the Rust side (dev builds only; `?cli=missing|old`, `?elevated=1`, `?n=<files>`)
 - `fixtures/*.ndjson` - sample CLI output; `v2_*` are hand-written from the contract (regenerate with `node scripts/gen-v2-fixtures.mjs`), `real_*` come from the actual sf-cli. Files in `../docs/contract-samples/` are parsed by the Rust tests too.
 
 ## Tests
 
 ```powershell
 cd src-tauri; cargo test    # NDJSON parsing of every event, sf-cli lookup order, argument quoting
-cd ..; npm test             # health map, file tree/filter store, virtualization, drive and map helpers
+cd ..; npm test             # Vitest: store actions and events, screens (Testing Library), file store, health map, helpers
 npm run build               # type check + production bundle
 ```

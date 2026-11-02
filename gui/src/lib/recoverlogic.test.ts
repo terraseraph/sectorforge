@@ -1,7 +1,7 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
-import { mapForSource, carveRange, isNtfs, partitionLabel } from "./recoverlogic.ts";
-import type { Partition } from "./contract.ts";
+import { mapForSource, carveRange, isNtfs, partitionLabel } from "./recoverlogic";
+import type { Partition } from "./contract";
 
 const p = (o: Partial<Partition>): Partition => ({ start_lba: 2048, size_sectors: 1000, filesystem: "ntfs", confidence: "confident", source: "mbr", label: null, ...o });
 

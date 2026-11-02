@@ -1,7 +1,7 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
-import { FileStore, ORPHANS, crumbs, splitPath, joinPath, noFilter } from "./filestore.ts";
-import type { FileRow } from "./contract.ts";
+import { FileStore, ORPHANS, crumbs, splitPath, joinPath, noFilter } from "./filestore";
+import type { FileRow } from "./contract";
 
 const row = (id: number, path: string | null, o: Partial<FileRow> = {}): FileRow =>
   ({ id, name: path ? path.split("/").pop()! : `orphan${id}`, path, is_dir: false, size: 10, deleted: false, recoverable: "full", ...o });

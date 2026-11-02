@@ -1,5 +1,5 @@
-import type { Device } from "./contract.ts";
-import { fmt } from "./util.ts";
+import type { Device } from "./contract";
+import { fmtBytes } from "./format";
 
 const norm = (p: string) => p.trim().toLowerCase();
 
@@ -22,5 +22,5 @@ export const deviceTitle = (d: Device) => d.model?.trim() || "Unknown drive";
 
 /** One-line description: "WDC WD20EZRZ, 1.82 TiB, SATA". */
 export function deviceSummary(d: Device): string {
-  return [deviceTitle(d), d.size === null ? "size unknown" : fmt(d.size), busLabel(d.bus)].join(", ");
+  return [deviceTitle(d), d.size === null ? "size unknown" : fmtBytes(d.size), busLabel(d.bus)].join(", ");
 }

@@ -1,6 +1,6 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
-import { cellsFromBlocks } from "./map.ts";
+import { cellsFromBlocks } from "./map";
 
 test("worst status wins within a slice", () => {
   const cells = cellsFromBlocks(

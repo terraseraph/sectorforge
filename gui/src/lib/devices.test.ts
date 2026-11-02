@@ -1,7 +1,7 @@
-import { test } from "node:test";
+import { test } from "vitest";
 import assert from "node:assert/strict";
-import { findDevice, systemDriveFor, deviceSummary, deviceTitle, busLabel } from "./devices.ts";
-import type { Device } from "./contract.ts";
+import { findDevice, systemDriveFor, deviceSummary, deviceTitle, busLabel } from "./devices";
+import type { Device } from "./contract";
 
 const d = (path: string, o: Partial<Device> = {}): Device =>
   ({ path, model: "WDC WD20EZRZ", serial: null, size: 2000398934016, sector_size: 512, bus: "sata", removable: false, system: false, ...o });
