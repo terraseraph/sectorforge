@@ -1,171 +1,202 @@
 # SectorForge
 
-A cross-platform drive-imaging and recovery tool: clone a failing drive
-sector-by-sector, isolate bad regions instead of giving up on them, then
-recover partitions and files from the resulting image.
+[![CI](https://github.com/terraseraph/sectorforge/actions/workflows/ci.yml/badge.svg)](https://github.com/terraseraph/sectorforge/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/terraseraph/sectorforge)](https://github.com/terraseraph/sectorforge/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Built because DMDE works but is dated and confusing (dense, abbreviation-heavy
-UI, no clear explanation of what SCSI/ATA/file access modes actually do).
-SectorForge aims to combine the best ideas from DMDE, TestDisk/PhotoRec,
-ddrescue/ddrescueview, R-Studio and UFS Explorer behind a much clearer UI (see
-the design mockup in the project notes) — and to actually explain itself while
-it runs.
+Rescue data from a failing hard drive. SectorForge clones the drive
+sector by sector, working around bad areas instead of giving up on them,
+then finds the partitions and recovers your files from the copy, including
+deleted ones.
 
-## Status
+It brings together ideas from ddrescue, TestDisk/PhotoRec, DMDE and R-Studio
+behind an interface that explains what it is doing and why. It runs on
+Windows and Linux as a portable app: no installer.
 
-Early. Working and tested: the imaging engine, partition detection, drive
-listing, signature-based file carving, NTFS file listing/recovery (including
-deleted files), and the CLI with a JSON mode. In progress: the GUI.
+> **If a drive is failing, stop using it.** Every hour it runs can make
+> things worse. Don't install anything onto it, and don't run repair tools
+> (chkdsk, fsck) on it. Copy it first with SectorForge, then recover from the
+> copy.
 
-## Layout
+## Download
 
-- `crates/sf-core` — the engine: cross-platform raw block device access,
-  a resumable ddrescue-style mapfile, and the imaging algorithm.
-  - `device/windows.rs` — `\\.\PhysicalDriveN` via `FILE_FLAG_NO_BUFFERING`
-    (direct hardware access, bypasses OS cache).
-  - `device/linux.rs` — `/dev/sdX` via `O_DIRECT`. **Not yet tested on real
-    Linux hardware** — written against documented ioctl numbers, needs
-    validation on an actual box before trusting it on a real drive.
-  - `device/file_backend.rs` — plain file backend ("Image file" mode): an
-    existing disk image, or a stand-in for a device in tests/dev without
-    needing admin rights or real hardware.
-  - `mapfile.rs` — tracks which byte ranges are rescued / bad / not yet
-    tried; saves in a ddrescue-compatible text format so an interrupted run
-    resumes correctly and the map can be opened in `ddrescueview`.
-  - `imager.rs` — two-pass algorithm: a fast forward sweep that skips past
-    damage to maximize rescued data quickly, then a retry pass that
-    binary-splits damaged regions down to the individual sectors that are
-    actually bad. Checkpoints the map every 5 s, so killing it loses at most
-    5 s of progress.
-  - `partitions.rs` — MBR (including extended/logical), GPT (CRC-checked,
-    falls back to the backup header), filesystems with no partition table,
-    and a signature scan that finds NTFS / FAT12/16/32 / exFAT / ext2-4
-    volumes when the table is damaged, or that it no longer lists.
-  - `drives/` — lists physical drives (works without Administrator/root) and
-    works out which physical disk any output path is on, so nothing is ever
-    written onto the drive being rescued.
-  - `reader.rs` — reads that never give up: unreadable bytes (bad sectors,
-    or ranges the imaging map says were never rescued) come back as zeros
-    *and are reported*, so results can say "partial" instead of lying.
-  - `carve/` — PhotoRec-style recovery by file signature: JPEG, PNG, GIF,
-    PDF, ZIP (and docx/xlsx/pptx), MP4/MOV, SQLite, 7z, RAR. Each format's
-    real end is found from its own structure, not guessed.
-  - `ntfs/` — reads the MFT directly: lists every file and folder including
-    deleted ones, rebuilds paths (with sequence-number checks so a reused
-    folder doesn't produce a wrong path), judges recoverability from the
-    cluster bitmap and the imaging map, and extracts files with sanitized
-    names.
-- `crates/sf-cli` — CLI wrapping the engine. `--json` emits the NDJSON
-  contract in [`docs/cli-contract.md`](docs/cli-contract.md), which is how the
-  GUI drives it.
-- `gui/` — Tauri desktop app; runs `sf-cli --json` as a child process.
+Get the latest from the **[Releases page](https://github.com/terraseraph/sectorforge/releases/latest)**.
 
-## Using the CLI
+| Platform | File | What it is |
+|---|---|---|
+| Windows 10/11 (x64) | `SectorForge-…-windows-x64-portable.zip` | The app. Unzip anywhere, run `SectorForge.exe`. |
+| Linux (x86_64) | `SectorForge-…-x86_64.AppImage` | The app. `chmod +x`, then run it. |
+| Windows | `sf-cli-…-windows-x64.zip` | Command-line tool only. |
+| Linux | `sf-cli-…-linux-x86_64-static.tar.gz` | Command-line tool only, fully static: runs on any distro. |
+
+`SHA256SUMS.txt` lists checksums for every file.
+
+**Windows notes**
+- The exe isn't code-signed yet, so SmartScreen may warn the first time.
+  Choose *More info → Run anyway*.
+- Keep `SectorForge.exe` and `sf-cli.exe` in the same folder.
+- Reading a physical drive needs Administrator rights. Pick a drive and the
+  app offers *Restart as Administrator*.
+- Uses Windows' built-in WebView2, which is preinstalled on Windows 11 and
+  current Windows 10.
+
+**Linux notes**
+- The AppImage needs FUSE 2. On Ubuntu 22.04+ install it with
+  `sudo apt install libfuse2`.
+- Reading a physical drive needs root. SectorForge asks for your password
+  through `pkexec` (polkit) when a job needs it.
+- Needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36, or later).
+  On anything older, use the static command-line tool.
+
+## How to recover a drive
+
+1. **Image.** Pick the failing drive, choose where to save the copy (on a
+   *different*, healthy drive), and start.
+   - The first pass copies everything that reads cleanly and skips damaged
+     areas, so the most data comes off before the drive gets any worse.
+   - The second pass goes back and retries the damaged areas sector by
+     sector.
+   - The **drive health map** shows what's been rescued, what's being
+     retried, and what's bad.
+   - You can pause and resume at any time. The *map file* records what's
+     been copied, so keep it with the image.
+2. **Partitions.** Point it at the image. It reads the partition table, and
+   with *Deep scan* it also searches the whole image for filesystems that
+   the table no longer lists (damaged or deleted partitions).
+3. **Recover.**
+   - **Files (NTFS)** lists every file and folder with its real name and
+     path, including deleted ones, and tells you which can be fully
+     recovered. Tick what you want and extract it.
+   - **Carve** finds files by their contents (photos, documents, archives,
+     videos) when there's no usable filesystem at all. Files come back
+     without their original names.
+
+SectorForge refuses to write anything onto the drive it's reading from, and
+it only ever *reads* the source drive.
+
+## Features
+
+- **Imaging:** two-pass, ddrescue-style cloning with bad-sector isolation,
+  pause/resume, and a progress map saved every 5 seconds. The map uses
+  ddrescue's format, so `ddrescueview` can open it too.
+- **Direct hardware access:** reads the raw drive, bypassing the OS cache
+  (`FILE_FLAG_NO_BUFFERING` on Windows, `O_DIRECT` on Linux), or works on an
+  image file.
+- **Partitions:**
+  - MBR, including extended/logical partitions.
+  - GPT, checksum-verified, with fallback to the backup header.
+  - Disks with no partition table.
+  - Signature scan for NTFS, FAT12/16/32, exFAT and ext2/3/4.
+- **NTFS recovery:**
+  - Reads the MFT directly: deleted files, fragmented files, sparse files,
+    and hard links stored in attribute lists.
+  - Rebuilds full paths.
+  - Checks whether a deleted file's space has since been reused.
+- **Carving:**
+  - Formats: JPEG, PNG, GIF, PDF, ZIP (recognising docx/xlsx/pptx), MP4/MOV,
+    SQLite, 7z and RAR.
+  - Each file's end is found from its own structure rather than guessed.
+- **Honest results:**
+  - Pass the imaging map to recovery, and any file overlapping a sector that
+    was never rescued is marked *partial* instead of silently containing
+    blanks.
+  - Recovered names are sanitized, so nothing can be written outside the
+    output folder.
+
+## Command line
+
+Everything the app does is available from `sf-cli`. Add `--json` to any
+command for machine-readable output (see the [JSON contract](docs/cli-contract.md)).
 
 ```powershell
-# Clone a raw physical drive (run as Administrator). The mapfile lets you
-# stop (Ctrl+C) and resume later without re-copying already-rescued data.
-sf-cli image --source \\.\PhysicalDrive1 --dest E:\image.img --map E:\image.map
+sf-cli devices                                   # list drives (no admin needed)
 
-# Or image an existing file / test without touching real hardware:
-sf-cli image --source C:\path\to\source.img --dest C:\path\to\clone.img --map C:\path\to\run.map
+# Clone a drive (as Administrator / root). Re-run the same command to resume.
+sf-cli image --source \\.\PhysicalDrive1 --dest E:\rescue\disk.img --map E:\rescue\disk.map
+sf-cli status --map E:\rescue\disk.map           # progress at any time
 
-# Check progress on a mapfile at any time:
-sf-cli status --map E:\image.map
+sf-cli scan --source E:\rescue\disk.img          # partitions (add --deep to hunt for lost ones)
 
-# Find partitions on the image (add --deep to also hunt for deleted or
-# unlisted ones by filesystem signature — reads the whole image):
-sf-cli scan --source E:\image.img
-```
+# NTFS: list files incl. deleted (partition start LBA comes from scan), then extract by id
+sf-cli files   --source E:\rescue\disk.img --partition-lba 2048 --map E:\rescue\disk.map
+sf-cli extract --source E:\rescue\disk.img --partition-lba 2048 --ids 4211,5120 --out F:\recovered
 
-```powershell
-# What drives are there? (works without Administrator)
-sf-cli devices
-
-# List files on the NTFS partition found by `scan` (start LBA 2048 here),
-# including deleted ones; pass the imaging map so unrescued areas are
-# reported honestly:
-sf-cli files --source E:\image.img --partition-lba 2048 --map E:\image.map
-
-# Copy files out by id (a folder id copies everything under it):
-sf-cli extract --source E:\image.img --partition-lba 2048 --ids 4211,5120 --out F:\recovered
-
-# No usable filesystem? Recover files by signature instead:
+# No filesystem? Recover by file signature:
 sf-cli carve --list-types
-sf-cli carve --source E:\image.img --out F:\carved --types jpg,pdf,docx
+sf-cli carve --source E:\rescue\disk.img --out F:\carved --types jpg,pdf,docx
 ```
 
-Recovery commands refuse to write their output onto the drive being read in
-device mode, and it's better still to run them against the cloned image
-rather than the failing drive.
+On Linux, drives are `/dev/sdX` or `/dev/nvme0n1`. Any source starting with
+`\\.\` or `/dev/` is read as a physical drive; anything else as an image file.
 
-Add `--json` to any command for machine-readable output.
+## Status and limitations
 
-Any source path starting with `\\.\` (Windows) or `/dev/` (Linux) is treated
-as a raw device (direct hardware access); anything else is opened as a plain
-file.
+SectorForge is young. The engine is well tested against simulated failing
+drives, a real Windows-formatted NTFS volume (every recovered file is checked
+byte for byte against the original), and real files made by standard tools.
+But:
 
-## Testing
+- **Reading a physical drive end to end hasn't been tested yet**, on either
+  platform. Listing drives and the safety checks have run on real hardware;
+  imaging a real drive is next. On Linux, raw-device reads are tested in CI
+  against loop devices, not real disks.
+- NTFS-compressed and encrypted files are listed and flagged, but not
+  decoded yet.
+- File browsing and extraction support NTFS only. FAT, exFAT and ext volumes
+  are detected but can only be recovered by carving.
+- Carving doesn't reassemble fragmented files.
+- If a deleted file's space was reused, what's recovered is whatever is
+  there now (it's flagged, not hidden).
+- On Windows Storage Spaces, the "don't write to the source drive" check sees
+  the virtual disk rather than its member drives.
+- A power cut during imaging can lose recent progress. Killing the program
+  can't: at most the last 5 seconds are redone.
 
-```powershell
-cargo test
-```
+Please report problems in the [issue tracker](https://github.com/terraseraph/sectorforge/issues).
+Back up anything you recover, and if the data is irreplaceable and
+the drive is clicking or not spinning up, consider a professional recovery
+lab before running *any* software on it.
 
-The engine's bad-sector/retry/resume logic is tested against an in-memory
-fake block device with injected failures (`FakeBlockDevice`) — safe to run
-anywhere, no real hardware involved. Carving is tested per format with
-synthetic files embedded in a fake disk; the NTFS reader against a
-hand-built volume (fragmented MFT, torn records, reused parents, hostile
-names) *and* against a real Windows-formatted volume
-(`crates/sf-core/tests/fixtures/ntfs-small.vhd.gz`, made by
-`make-ntfs-fixture.ps1` next to it), checked file-by-file against SHA-256s
-recorded when the files were written.
+## Building from source
 
-End-to-end contract check (builds synthetic disks, runs every command and
-error path, validates the NDJSON and exit codes; `-Samples` refreshes
-`docs/contract-samples/`):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\contract-smoke.ps1
-```
-
-Linux raw-device check against real loop devices (512- and 4096-byte
-sectors; needs sudo for `losetup`):
+Requirements: Rust (stable) and Node.js 22. On Linux you also need the Tauri
+system libraries listed in [`gui/README.md`](gui/README.md).
 
 ```bash
-scripts/linux-loopdev-test.sh
+cargo build --release -p sf-cli          # the engine + CLI
+cargo test --workspace                   # engine tests
+
+cd gui
+npm ci
+npm test && npm run build                # GUI frontend
+npx tauri dev                            # run the app (finds ../target/release/sf-cli)
 ```
 
-## Known gaps / next steps
+Release packages are built by [GitHub Actions](.github/workflows/release.yml)
+when a `v*` tag is pushed. The steps are documented in [`gui/README.md`](gui/README.md).
 
-- Neither raw device backend has read real hardware yet. The Windows one has
-  been checked only as far as refusing access without Administrator (drive
-  *listing* and the same-drive check do work unelevated and were run against
-  real drives). The Linux backend compiles and has a loop-device test
-  (`scripts/linux-loopdev-test.sh`), but that test hasn't been run yet: no
-  Linux machine or WSL was available.
-- The same-drive check follows a volume down to its physical disks
-  (Windows disk extents; Linux partitions, device-mapper and md). Storage
-  Spaces on Windows reports its virtual disk rather than the member drives,
-  so that case isn't caught; when the disk can't be determined at all the
-  CLI refuses rather than guessing.
-- NTFS-compressed and EFS-encrypted files are listed and flagged
-  (`partial`, `complete:false` with a note) but not decoded; LZNT1
-  decompression is next.
-- `files`/`extract` support NTFS only (no FAT/exFAT/ext yet). They need a
-  readable boot sector at the given LBA (the backup boot sector at the end
-  of the volume isn't tried); a damaged `$MFT` record 0 falls back to the
-  `$MFTMirr` copy.
-- A deleted file whose clusters were reused is extracted with whatever now
-  occupies them (and flagged); there's no attempt to tell old data from new.
-- Carving finds files only at sector boundaries (as PhotoRec does by
-  default), doesn't reassemble fragmented files, and a file whose end can't
-  be found is cut at the next recognizable header or a per-type limit.
-- MBR offsets assume 512-byte sectors (normal for MBR disks; native-4K drives
-  use GPT, which handles any sector size).
-- The signature scan skips a whole 4 MiB chunk if any read in it fails, so on
-  a failing *device* it can miss a filesystem that starts in that chunk.
-  Scanning the cloned image avoids this.
-- Map checkpoints survive the process being killed, but not a power cut
-  (the destination file isn't fsynced).
-- No `--reverse` (read backward) retry direction yet, unlike ddrescue.
+### Layout
+
+- `crates/sf-core`: the engine.
+  - Raw device access, the resumable mapfile and the imaging algorithm.
+  - Partition detection, drive listing and the same-drive check.
+  - NTFS reader and carving.
+- `crates/sf-cli`: the command-line tool, a thin layer over the engine.
+- `gui/`: Tauri 2 desktop app. It runs `sf-cli --json` as a separate process
+  and never links the engine, so only `sf-cli` needs elevated rights.
+- `docs/cli-contract.md`: the JSON protocol between them.
+  `docs/contract-samples/` holds real output.
+- `scripts/`: the end-to-end contract check (`contract-smoke.ps1`) and the
+  Linux loop-device test.
+
+## Acknowledgements
+
+Inspired by [GNU ddrescue](https://www.gnu.org/software/ddrescue/),
+[TestDisk & PhotoRec](https://www.cgsecurity.org/), DMDE, R-Studio and UFS
+Explorer. SectorForge is an independent project, not affiliated with any of
+them.
+
+## License
+
+[MIT](LICENSE). Provided as is, without warranty. Data recovery carries
+risk; read the advice above before running anything on a failing drive.
