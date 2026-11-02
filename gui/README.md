@@ -16,7 +16,7 @@ npm run dev                    # UI only, in a browser: a mock stands in for Rus
 
 `npm run dev` in a plain browser is for checking layout. Add `?n=5000000` to try a huge listing, `?cli=missing` or `?cli=old` to see the sf-cli banner, `?elevated=1` to hide the Administrator prompt.
 
-Reading a physical drive needs elevated rights. On Windows the picker offers **Restart as Administrator** (relaunches the exe with the `runas` verb and keeps the source, destination and map). On Linux device-mode jobs run through `pkexec` when the user is not root or in the `disk` group.
+Reading a physical drive needs elevated rights. On Windows the picker offers **Restart as Administrator** (relaunches the exe with the `runas` verb and keeps the source, destination and map). On Linux device-mode jobs run through `pkexec` when the user is not root or in the `disk` group. Inside an AppImage, sf-cli is first copied to `$XDG_RUNTIME_DIR/sectorforge/` (or a private `/tmp` dir, mode 0700) because root usually cannot read the AppImage mount. **Linux device mode (pkexec, the copy, Stop) has never been exercised for real.**
 
 ## Locating sf-cli
 

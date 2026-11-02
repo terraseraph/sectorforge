@@ -244,6 +244,50 @@ pub fn wants_pkexec(args: &[String], elevated: bool, linux: bool) -> bool {
     linux && !elevated && args.windows(2).any(|w| w[0] == "--source" && w[1].starts_with("/dev/"))
 }
 
+/// Inside an AppImage the sidecar sits on a FUSE mount that root usually cannot read
+/// (no allow_other), so pkexec would fail with permission denied.
+pub fn needs_private_copy(cli: &Path, appdir: Option<&std::ffi::OsStr>) -> bool {
+    appdir.is_some_and(|d| !d.is_empty() && cli.starts_with(d)) || cli.starts_with("/tmp/.mount_")
+}
+
+/// Where the root-readable copy lives: $XDG_RUNTIME_DIR/sectorforge, else a unique dir under /tmp.
+pub fn private_dir(xdg_runtime: Option<OsString>, pid: u32, nanos: u128) -> PathBuf {
+    match xdg_runtime.filter(|p| !p.is_empty()) {
+        Some(x) => PathBuf::from(x).join("sectorforge"),
+        None => PathBuf::from("/tmp").join(format!("sectorforge-{pid}-{nanos}")),
+    }
+}
+
+/// Copy again when missing, a different size, or the source is newer than the copy.
+pub fn copy_is_stale(src: (u64, std::time::SystemTime), dst: Option<(u64, std::time::SystemTime)>) -> bool {
+    dst.is_none_or(|d| d.0 != src.0 || src.1 > d.1)
+}
+
+#[cfg(unix)]
+fn stage_for_root(cli: &Path) -> Result<PathBuf, String> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let err = |what: &str, e: std::io::Error| format!("Could not prepare sf-cli for administrator use ({what}): {e}");
+    let dir = DIR.get_or_init(|| {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        private_dir(std::env::var_os("XDG_RUNTIME_DIR"), std::process::id(), nanos)
+    });
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| err("creating folder", e))?;
+    let dest = dir.join("sf-cli");
+    let meta = |p: &Path| std::fs::metadata(p).ok().and_then(|m| Some((m.len(), m.modified().ok()?)));
+    let src = meta(cli).ok_or_else(|| format!("Could not read sf-cli at {}.", cli.display()))?;
+    if copy_is_stale(src, meta(&dest)) {
+        std::fs::copy(cli, &dest).map_err(|e| err("copying", e))?;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755)).map_err(|e| err("chmod", e))?;
+    }
+    Ok(dest)
+}
+
+#[cfg(not(unix))]
+fn stage_for_root(cli: &Path) -> Result<PathBuf, String> {
+    Ok(cli.to_path_buf())
+}
+
 pub fn command(args: &[String]) -> Command {
     let mut c = Command::new(cli_path());
     c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -261,8 +305,9 @@ pub fn job_command(args: &[String]) -> Result<Command, String> {
     let pk = find_in_path("pkexec", std::env::var_os("PATH")).ok_or_else(|| {
         "Reading a drive directly needs administrator rights, and this system has no pkexec to ask for them. Install polkit (the pkexec command), start SectorForge with sudo, or add your user to the disk group. Or work from an image file instead.".to_string()
     })?;
-    // pkexec needs an absolute program path.
+    // pkexec needs an absolute program path, and root must be able to read it.
     let cli = std::fs::canonicalize(cli_path()).unwrap_or_else(|_| cli_path());
+    let cli = if needs_private_copy(&cli, std::env::var_os("APPDIR").as_deref()) { stage_for_root(&cli)? } else { cli };
     let mut c = Command::new(pk);
     c.arg(cli).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     Ok(c)
@@ -631,6 +676,25 @@ mod tests {
         let (v, c, problem) = interpret_version(p, "", false);
         assert!(v.is_none() && c.is_none());
         assert!(problem.unwrap().contains("older"));
+    }
+
+    #[test]
+    fn private_copy_decisions() {
+        use std::time::{Duration, SystemTime};
+        let ap = std::ffi::OsString::from("/tmp/.mount_abc");
+        assert!(needs_private_copy(Path::new("/tmp/.mount_abc/usr/bin/sf-cli"), Some(&ap)));
+        assert!(needs_private_copy(Path::new("/tmp/.mount_zzz/usr/bin/sf-cli"), None)); // mount seen without APPDIR
+        assert!(!needs_private_copy(Path::new("/usr/bin/sf-cli"), Some(&ap)));
+        assert!(!needs_private_copy(Path::new("/usr/bin/sf-cli"), None));
+        assert_eq!(private_dir(Some("/run/user/1000".into()), 1, 2).to_string_lossy().replace('\', "/"), "/run/user/1000/sectorforge");
+        assert_eq!(private_dir(Some("".into()), 7, 9), PathBuf::from("/tmp/sectorforge-7-9"));
+        assert_eq!(private_dir(None, 7, 9), PathBuf::from("/tmp/sectorforge-7-9"));
+        let t = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let later = t + Duration::from_secs(5);
+        assert!(copy_is_stale((10, t), None));
+        assert!(copy_is_stale((10, t), Some((11, later))));
+        assert!(copy_is_stale((10, later), Some((10, t))));
+        assert!(!copy_is_stale((10, t), Some((10, later))));
     }
 
     #[test]
