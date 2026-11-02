@@ -31,12 +31,19 @@ jobs:
         shell: pwsh
         run: |
           $ver = "${{ github.ref_name }}" -replace '/', '-'
-          New-Item -ItemType Directory -Force pkg, out | Out-Null
-          Copy-Item gui/src-tauri/target/release/sectorforge-gui.exe pkg/SectorForge.exe
-          Copy-Item target/release/sf-cli.exe pkg/sf-cli.exe
-          Copy-Item README.md, LICENSE pkg/
-          Compress-Archive pkg/* "out/SectorForge-$ver-windows-x64-portable.zip"
+          New-Item -ItemType Directory -Force out | Out-Null
+          # One portable exe: the engine is built in (it runs itself with `sf-cli` as the first argument).
+          Copy-Item gui/src-tauri/target/release/sectorforge-gui.exe "out/SectorForge-$ver-windows-x64.exe"
           Compress-Archive target/release/sf-cli.exe, README.md, LICENSE "out/sf-cli-$ver-windows-x64.zip"
+      - name: Check the exe runs its built-in engine
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem out/SectorForge-*-windows-x64.exe | Select-Object -First 1
+          $psi = New-Object System.Diagnostics.ProcessStartInfo $exe.FullName, "sf-cli version --json"
+          $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.CreateNoWindow = $true
+          $p = [System.Diagnostics.Process]::Start($psi); $out = $p.StandardOutput.ReadToEnd(); $p.WaitForExit()
+          Write-Host $out
+          if ($p.ExitCode -ne 0 -or $out -notmatch '"contract":2') { throw "built-in engine check failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: windows

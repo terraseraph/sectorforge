@@ -203,6 +203,36 @@ pub fn cli_path() -> PathBuf {
     resolve(std::env::var_os("SF_CLI_PATH"), our_exe_dir(), &repo_root(), std::env::var_os("PATH"))
 }
 
+/// First argument that makes the Windows GUI exe run as sf-cli instead of opening a window.
+pub const EMBEDDED_ARG: &str = "sf-cli";
+
+/// The Windows build embeds the engine (one portable exe). Linux keeps the separate static
+/// sf-cli sidecar: pkexec can't run anything from inside the AppImage's private mount.
+pub const ENGINE_EMBEDDED: bool = cfg!(windows);
+
+/// What to run for an sf-cli invocation: a program plus arguments that go before sf-cli's own.
+/// `SF_CLI_PATH` always wins, so a separately built sf-cli can still be tested.
+pub fn engine(env: Option<OsString>, own_exe: Option<PathBuf>, embedded: bool) -> Option<(PathBuf, Vec<String>)> {
+    if env.as_ref().is_some_and(|p| !p.is_empty()) || !embedded {
+        return None;
+    }
+    own_exe.map(|exe| (exe, vec![EMBEDDED_ARG.to_string()]))
+}
+
+fn current_engine() -> (PathBuf, Vec<String>) {
+    engine(std::env::var_os("SF_CLI_PATH"), std::env::current_exe().ok(), ENGINE_EMBEDDED).unwrap_or_else(|| (cli_path(), Vec::new()))
+}
+
+/// For messages: what actually runs the engine.
+pub fn engine_display() -> String {
+    let (prog, prefix) = current_engine();
+    if prefix.is_empty() {
+        prog.display().to_string()
+    } else {
+        format!("{} (built-in engine)", prog.display())
+    }
+}
+
 /// Where `cli_path` looks, for the "not found" banner.
 pub fn searched_places() -> Vec<String> {
     let mut v = vec![match std::env::var_os("SF_CLI_PATH") {
@@ -220,14 +250,14 @@ pub fn searched_places() -> Vec<String> {
 }
 
 /// Turn the output of `sf-cli version --json` into (version, contract, problem).
-pub fn interpret_version(path: &Path, stdout: &str, ran_ok: bool) -> (Option<String>, Option<u32>, Option<String>) {
+pub fn interpret_version(path: &str, stdout: &str, ran_ok: bool) -> (Option<String>, Option<u32>, Option<String>) {
     let fix = "Put the sf-cli that came in the same download next to SectorForge, or point the SF_CLI_PATH environment variable at the right file.";
     for line in stdout.lines() {
         if let Ok(Some(Event::Version { version, contract })) = parse_line(line) {
             let problem = (contract != EXPECTED_CONTRACT).then(|| {
                 format!(
                     "SectorForge found sf-cli at {} (version {version}), which speaks contract {contract}, but this app needs contract {EXPECTED_CONTRACT}. {fix}",
-                    path.display()
+                    path
                 )
             });
             return (Some(version), Some(contract), problem);
@@ -238,7 +268,7 @@ pub fn interpret_version(path: &Path, stdout: &str, ran_ok: bool) -> (Option<Str
     } else {
         "it does not know the version command, so it is older than this app expects"
     };
-    (None, None, Some(format!("SectorForge found sf-cli at {} but {why}. {fix}", path.display())))
+    (None, None, Some(format!("SectorForge found sf-cli at {} but {why}. {fix}", path)))
 }
 
 /// Linux device-mode jobs run through pkexec unless we already have the rights.
@@ -253,6 +283,7 @@ pub fn needs_private_copy(cli: &Path, appdir: Option<&std::ffi::OsStr>) -> bool 
 }
 
 /// Where the root-readable copy lives: $XDG_RUNTIME_DIR/sectorforge, else a unique dir under /tmp.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn private_dir(xdg_runtime: Option<OsString>, pid: u32, nanos: u128) -> PathBuf {
     match xdg_runtime.filter(|p| !p.is_empty()) {
         Some(x) => PathBuf::from(x).join("sectorforge"),
@@ -261,6 +292,7 @@ pub fn private_dir(xdg_runtime: Option<OsString>, pid: u32, nanos: u128) -> Path
 }
 
 /// Copy again when missing, a different size, or the source is newer than the copy.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn copy_is_stale(src: (u64, std::time::SystemTime), dst: Option<(u64, std::time::SystemTime)>) -> bool {
     dst.is_none_or(|d| d.0 != src.0 || src.1 > d.1)
 }
@@ -291,8 +323,9 @@ fn stage_for_root(cli: &Path) -> Result<PathBuf, String> {
 }
 
 pub fn command(args: &[String]) -> Command {
-    let mut c = Command::new(cli_path());
-    c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let (prog, prefix) = current_engine();
+    let mut c = Command::new(prog);
+    c.args(prefix).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000); // no console flash
     c
@@ -316,14 +349,14 @@ pub fn job_command(args: &[String]) -> Result<Command, String> {
 }
 
 pub fn spawn_error(e: &std::io::Error) -> String {
-    let p = cli_path();
+    let p = engine_display();
     if e.kind() == std::io::ErrorKind::NotFound {
         format!(
             "sf-cli was not found (looked for {}). Put sf-cli next to SectorForge, set the SF_CLI_PATH environment variable to its full path, or (when developing) build it with `cargo build -p sf-cli`.",
-            p.display()
+            p
         )
     } else {
-        format!("Could not start sf-cli ({}): {e}", p.display())
+        format!("Could not start sf-cli ({}): {e}", p)
     }
 }
 
@@ -670,8 +703,20 @@ mod tests {
     }
 
     #[test]
+    fn embedded_engine_is_the_own_exe_unless_overridden() {
+        let exe = || Some(PathBuf::from("C:/Apps/SectorForge.exe"));
+        assert_eq!(engine(None, exe(), true), Some((PathBuf::from("C:/Apps/SectorForge.exe"), vec!["sf-cli".to_string()])));
+        // SF_CLI_PATH still selects a separately built sf-cli.
+        assert_eq!(engine(Some("D:/dev/sf-cli.exe".into()), exe(), true), None);
+        // An empty SF_CLI_PATH counts as unset.
+        assert!(engine(Some("".into()), exe(), true).is_some());
+        // Linux: always the separate sf-cli (sidecar).
+        assert_eq!(engine(None, exe(), false), None);
+    }
+
+    #[test]
     fn version_interpretation() {
-        let p = Path::new("C:/x/sf-cli.exe");
+        let p = "C:/x/sf-cli.exe";
         let (v, c, problem) = interpret_version(p, &fixture("v2_version.ndjson"), true);
         assert_eq!((v.as_deref(), c, problem), (Some("0.2.0"), Some(2), None));
         let (_, c, problem) = interpret_version(p, r#"{"event":"version","version":"0.1.0","contract":1}"#, true);

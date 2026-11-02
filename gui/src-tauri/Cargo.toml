@@ -18,3 +18,5 @@ serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+# The engine, embedded so Windows ships one portable exe (see EMBEDDED_ARG in cli.rs).
+sf-cli = { path = "../../crates/sf-cli" }

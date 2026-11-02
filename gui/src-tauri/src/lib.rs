@@ -1,5 +1,7 @@
 mod cli;
 
+pub use cli::EMBEDDED_ARG;
+
 use cli::{Event, FileEvent, Slot};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -288,7 +290,7 @@ struct CliInfo {
 /// Launch-time check: where is sf-cli, and does it speak the contract this app was built for?
 #[tauri::command]
 async fn cli_info() -> CliInfo {
-    let path = cli::cli_path();
+    let path = cli::engine_display();
     let searched = cli::searched_places();
     let platform = std::env::consts::OS;
     let pkexec = cli::find_in_path("pkexec", std::env::var_os("PATH")).is_some();
@@ -297,7 +299,7 @@ async fn cli_info() -> CliInfo {
         .await
         .ok();
     let base = |found, version, contract, problem| CliInfo {
-        path: path.display().to_string(), searched: searched.clone(), found, version, contract, problem, platform, pkexec,
+        path: path.clone(), searched: searched.clone(), found, version, contract, problem, platform, pkexec,
     };
     match out {
         Some(Ok(o)) => {

@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 description = "SectorForge command-line imaging tool"
 
+[lib]
+name = "sf_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sf-cli"
 path = "src/main.rs"

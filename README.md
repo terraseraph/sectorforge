@@ -29,7 +29,7 @@ Get the latest from the **[Releases page](https://github.com/terraseraph/sectorf
 
 | Platform | File | What it is |
 |---|---|---|
-| Windows 10/11 (x64) | `SectorForge-…-windows-x64-portable.zip` | The app. Unzip anywhere, run `SectorForge.exe`. |
+| Windows 10/11 (x64) | `SectorForge-…-windows-x64.exe` | The app: one portable exe. Put it anywhere and run it. |
 | Linux (x86_64) | `SectorForge-…-x86_64.AppImage` | The app. `chmod +x`, then run it. |
 | Windows | `sf-cli-…-windows-x64.zip` | Command-line tool only. |
 | Linux | `sf-cli-…-linux-x86_64-static.tar.gz` | Command-line tool only, fully static: runs on any distro. |
@@ -39,7 +39,8 @@ Get the latest from the **[Releases page](https://github.com/terraseraph/sectorf
 **Windows notes**
 - The exe isn't code-signed yet, so SmartScreen may warn the first time.
   Choose *More info → Run anyway*.
-- Keep `SectorForge.exe` and `sf-cli.exe` in the same folder.
+- The recovery engine is built into the exe, so there's nothing else to keep
+  next to it.
 - Reading a physical drive needs Administrator rights. Pick a drive and the
   app offers *Restart as Administrator*.
 - Uses Windows' built-in WebView2, which is preinstalled on Windows 11 and

@@ -3,10 +3,12 @@
 v2 adds `version`, `devices`, `carve`, `files`, `extract`, and two new
 `image` refusals. Everything in v1 is unchanged.
 
-The GUI never links `sf-core` directly. It runs `sf-cli` as a child process
-with `--json` and reads its stdout. This keeps privileged raw-disk access in a
-separate process (only `sf-cli` needs Administrator/root), and lets the GUI be
-replaced without touching the engine.
+The GUI never calls `sf-core` directly. It runs `sf-cli` as a child process
+with `--json` and reads its stdout. That keeps the engine behind one stable
+protocol, and on Linux keeps privileged raw-disk access in a separate process
+(only `sf-cli` runs as root, via pkexec). On Windows the engine is compiled into
+the GUI exe, which runs a copy of *itself* as the child (`SectorForge.exe sf-cli
+<args>`); the protocol is identical.
 
 ## Rules
 

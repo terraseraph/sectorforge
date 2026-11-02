@@ -1,6 +1,6 @@
 # SectorForge GUI
 
-Tauri 2 + React 19 + TypeScript (strict), built with Vite. Behaviour is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The GUI never links `sf-core`; it spawns `sf-cli --json` and parses NDJSON (see `../docs/cli-contract.md`, contract v2).
+Tauri 2 + React 19 + TypeScript (strict), built with Vite. Behaviour is specified in [REQUIREMENTS.md](REQUIREMENTS.md). The GUI never calls `sf-core` directly; it runs the engine (`sf-cli --json`, built into the exe on Windows) as a child process and parses NDJSON (see `../docs/cli-contract.md`, contract v2).
 
 Screens: **Image** (drive picker, live health map), **Partitions** (drive picker, scan), **Recover** (browse and extract files from NTFS including deleted ones, or carve by file signature).
 
@@ -18,46 +18,36 @@ npm run dev                    # UI only, in a browser: a mock stands in for Rus
 
 Reading a physical drive needs elevated rights. On Windows the picker offers **Restart as Administrator** (relaunches the exe with the `runas` verb and keeps the source, destination and map). On Linux device-mode jobs run through `pkexec` when the user is not root or in the `disk` group. Inside an AppImage, sf-cli is first copied to `$XDG_RUNTIME_DIR/sectorforge/` (or a private `/tmp` dir, mode 0700) because root usually cannot read the AppImage mount. **Linux device mode (pkexec, the copy, Stop) has never been exercised for real.**
 
-## Locating sf-cli
+## Where the engine comes from
 
-Lookup order (`src-tauri/src/cli.rs`, `resolve`):
+**Windows: built in.** The GUI exe links the `sf-cli` crate as a library. For every job it launches *itself* with `sf-cli` as the first argument (`SectorForge.exe sf-cli <args>`), and `src-tauri/src/main.rs` runs the engine instead of opening a window. The JSON contract, killing the process to pause or stop, and stderr handling all work exactly as with a separate `sf-cli.exe`; there is just nothing to ship next to the exe. `SF_CLI_PATH` (a full path) still overrides this, for testing a separately built sf-cli.
+
+**Linux: a separate `sf-cli` sidecar.** pkexec runs as root, and root can't run anything from inside the AppImage's private mount, so Linux keeps a separate static sf-cli. Lookup order (`src-tauri/src/cli.rs`, `resolve`):
 
 1. `SF_CLI_PATH` environment variable (full path; used even if missing, so the error names it)
-2. the directory of the SectorForge executable (portable zip, AppImage sidecar)
+2. the directory of the SectorForge executable (AppImage sidecar)
 3. dev: `<repo>/target/debug`, then `<repo>/target/release` (repo path baked in at compile time)
 4. `sf-cli` on `PATH`
 
-At launch the app runs `sf-cli version --json`. If sf-cli is missing, too old, or `contract` is not 2, a banner names the file it found and what to do.
+At launch the app runs `sf-cli version --json` through whichever engine applies. If it is missing, too old, or `contract` is not 2, a banner says what it found and what to do.
 
 ## Release build
 
-CI runs these from the repo root. Outputs: a portable Windows zip and a Linux AppImage.
+CI runs these from the repo root. Outputs: one portable Windows exe and a Linux AppImage, plus standalone sf-cli builds.
 
-### Windows (portable zip)
+### Windows (one portable exe)
 
 ```powershell
-cargo build --release -p sf-cli
+cargo build --release -p sf-cli           # only for the standalone sf-cli download
 cd gui
 npm ci
-npm run tauri -- build --no-bundle        # gui\src-tauri\target\release\sectorforge-gui.exe (or <repo>\target\release if a workspace target dir is used; check both)
+npx tauri build --no-bundle               # gui\src-tauri\target\release\sectorforge-gui.exe
 ```
 
-The release exe has no console window (`windows_subsystem = "windows"` in `src-tauri/src/main.rs`; sf-cli is spawned with `CREATE_NO_WINDOW`).
-
-Zip layout (both files side by side, no installer):
-
-```
-SectorForge-windows-x64.zip
-  SectorForge.exe      <- sectorforge-gui.exe, renamed
-  sf-cli.exe           <- target\release\sf-cli.exe
-```
+Ship `sectorforge-gui.exe` renamed to `SectorForge-<version>-windows-x64.exe`. It has no console window (`windows_subsystem = "windows"`); the engine copies it starts are launched with `CREATE_NO_WINDOW` and talk over pipes. To check the engine is built in:
 
 ```powershell
-$app = "gui\src-tauri\target\release\sectorforge-gui.exe"
-New-Item -ItemType Directory -Force dist-zip | Out-Null
-Copy-Item $app dist-zip\SectorForge.exe
-Copy-Item target\release\sf-cli.exe dist-zip\sf-cli.exe
-Compress-Archive dist-zip\* SectorForge-windows-x64.zip -Force
+.\src-tauri\target\release\sectorforge-gui.exe sf-cli version --json | Out-String   # {"contract":2,...}
 ```
 
 WebView2 must be on the machine (preinstalled on Windows 11 and current Windows 10).
