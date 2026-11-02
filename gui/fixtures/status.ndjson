@@ -1,0 +1,1 @@
+{"event":"status","size":2097152,"current_pos":2097152,"totals":{"finished":1048576,"bad_sector":512,"non_trimmed":0,"non_scraped":0,"non_tried":1048064},"blocks":[{"pos":0,"size":1048576,"status":"finished"},{"pos":1048576,"size":512,"status":"bad_sector"},{"pos":1049088,"size":1048064,"status":"non_tried"}]}

@@ -1,0 +1,9 @@
+{"event":"start","mode":"file","resumed":false,"sector_size":512,"size":8388608,"source":"C:\\Users\\terra\\AppData\\Local\\Temp\\sf_fixtures\\disk.img"}
+{"event":"pass_start","name":"copy","pass":1}
+{"bytes_bad":0,"bytes_pending":8323072,"bytes_rescued":65536,"bytes_total":8388608,"current_pos":65536,"event":"progress","pass":1}
+{"bytes_bad":0,"bytes_pending":0,"bytes_rescued":8388608,"bytes_total":8388608,"current_pos":8388608,"event":"progress","pass":1}
+{"event":"pass_complete","pass":1}
+{"event":"pass_start","name":"retry","pass":2}
+{"bytes_bad":0,"bytes_pending":0,"bytes_rescued":8388608,"bytes_total":8388608,"current_pos":8388608,"event":"progress","pass":2}
+{"event":"pass_complete","pass":2}
+{"event":"done","totals":{"bad_sector":0,"finished":8388608,"non_scraped":0,"non_tried":0,"non_trimmed":0}}

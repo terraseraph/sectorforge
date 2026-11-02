@@ -82,7 +82,14 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
         }
         // Image data must reach the OS before the map claims it's rescued.
         self.dest.flush()?;
-        self.map.save(path)?;
+        match self.map.save(path) {
+            Ok(()) => {}
+            // Antivirus, indexers and sync clients briefly lock files on
+            // Windows. A missed periodic save just means the next one covers
+            // more; aborting a recovery over it would be far worse.
+            Err(_) if !force => {}
+            Err(e) => return Err(e),
+        }
         self.last_checkpoint = Instant::now();
         Ok(())
     }

@@ -280,6 +280,21 @@ fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
             m.size(),
             size
         );
+        // The map is only meaningful alongside the image it describes: regions
+        // it calls finished are never re-read, so a missing or different
+        // destination would silently end up with holes.
+        let already = m.bytes_with_status(Status::Finished);
+        if already > 0 {
+            let dest_len = std::fs::metadata(&a.dest).map(|d| d.len()).ok();
+            anyhow::ensure!(
+                dest_len == Some(size),
+                "the map says {} was already copied, but the destination {} {}. Resuming would leave those parts of the image empty. \
+                 Use the destination file from the original run, or delete the map to start over.",
+                format_bytes(already),
+                a.dest.display(),
+                if dest_len.is_none() { "doesn't exist" } else { "is a different size" }
+            );
+        }
         out.say(format!("Resuming from existing map {}", a.map.display()));
         m
     } else {

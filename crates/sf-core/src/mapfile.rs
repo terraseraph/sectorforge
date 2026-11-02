@@ -212,7 +212,19 @@ impl MapFile {
             f.write_all(self.to_ddrescue_string().as_bytes())?;
             f.sync_all()?;
         }
-        std::fs::rename(&tmp_path, path)
+        // Replacing a file another process has open briefly fails on
+        // Windows; retry before giving up.
+        let mut attempt = 0;
+        loop {
+            match std::fs::rename(&tmp_path, path.as_ref()) {
+                Ok(()) => return Ok(()),
+                Err(e) if attempt < 5 && e.kind() == io::ErrorKind::PermissionDenied => {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, MapFileError> {

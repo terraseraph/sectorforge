@@ -1,0 +1,8 @@
+{"event":"start","source":"\\\\.\\PhysicalDrive1","mode":"device","size":2000398934016,"sector_size":512,"resumed":false,"future_field":1}
+{"event":"pass_start","pass":1,"name":"copy"}
+{"event":"progress","pass":1,"current_pos":1048576,"bytes_total":2000398934016,"bytes_rescued":1048576,"bytes_bad":0,"bytes_pending":2000397885440}
+{"event":"pass_complete","pass":1}
+{"event":"pass_start","pass":2,"name":"retry"}
+{"event":"progress","pass":2,"current_pos":2097152,"bytes_total":2000398934016,"bytes_rescued":2093056,"bytes_bad":4096,"bytes_pending":2000392740864}
+{"event":"pass_complete","pass":2}
+{"event":"done","totals":{"finished":0,"bad_sector":0,"non_trimmed":0,"non_scraped":0,"non_tried":0}}

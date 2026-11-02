@@ -1,0 +1,3 @@
+{"event":"start","source":"E:\\image.img","mode":"file","size":2000398934016,"sector_size":512}
+{"event":"scan_progress","bytes_scanned":4194304,"bytes_total":2000398934016}
+{"event":"result","table_kind":"mbr","partitions":[{"start_lba":2048,"size_sectors":1447256064,"filesystem":"ntfs","confidence":"confident","source":"mbr","label":null},{"start_lba":1447258112,"size_sectors":null,"filesystem":"fat32","confidence":"rebuilt","source":"signature_scan","label":null},{"start_lba":3000000000,"size_sectors":1000,"filesystem":"unknown","confidence":"low_confidence","source":"gpt","label":"Data"}]}

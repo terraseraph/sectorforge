@@ -1,0 +1,5 @@
+{"event":"pass_start","pass":1,"name":"copy"}
+this is not json
+{"event":"mystery","x":1}
+
+{"event":"pass_complete","pass":1}

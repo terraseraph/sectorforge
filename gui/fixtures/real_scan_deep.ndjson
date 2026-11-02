@@ -1,0 +1,4 @@
+{"event":"start","mode":"file","sector_size":512,"size":8388608,"source":"C:\\Users\\terra\\AppData\\Local\\Temp\\sf_fixtures\\clone.img"}
+{"bytes_scanned":4194304,"bytes_total":8388608,"event":"scan_progress"}
+{"bytes_scanned":8388608,"bytes_total":8388608,"event":"scan_progress"}
+{"event":"result","partitions":[{"confidence":"confident","filesystem":"ntfs","label":null,"size_sectors":2048,"source":"mbr","start_lba":64},{"confidence":"rebuilt","filesystem":"fat32","label":null,"size_sectors":2048,"source":"signature_scan","start_lba":10240}],"table_kind":"mbr"}
