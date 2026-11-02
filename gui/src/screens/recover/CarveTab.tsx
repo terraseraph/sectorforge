@@ -1,10 +1,10 @@
 import { useEffect } from "react";
+import { PartitionPicker } from "../../components/PartitionPicker";
 import { VirtualList } from "../../components/VirtualList";
 import { JobActivity } from "../../components/Shell";
 import { Badge, Busy, Button, Field, Hint, Panel, ProgressBar, TextInput } from "../../components/ui";
 import { dialogs } from "../../lib/api";
 import { fmtBytes, fmtCount, percent } from "../../lib/format";
-import { partitionLabel } from "../../lib/recoverlogic";
 import { loadTypes, startCarve, startScan, stopCarve } from "../../store/actions";
 import { useApp } from "../../store/app";
 import { type CarvedRow, useRecover } from "../../store/recover";
@@ -16,7 +16,8 @@ export function CarveTab({ source }: { source: string }) {
   const typesError = useRecover((s) => s.typesError);
   const carvePart = useRecover((s) => s.carvePart);
   const carveOut = useRecover((s) => s.carveOut);
-  const parts = partitionsFor(useScan((s) => s.result), source) ?? [];
+  const result = useScan((s) => s.result);
+  const parts = partitionsFor(result, source);
 
   useEffect(() => {
     if (!types && !typesError) void loadTypes();
@@ -33,26 +34,23 @@ export function CarveTab({ source }: { source: string }) {
         <TypePicker />
 
         <div className="spaced">
-          <Field
-            id="cpart"
-            label="Search in"
-            action={
-              <Button disabled={!!running} onClick={() => void startScan(source, false)}>
-                Scan source
-              </Button>
-            }
-          >
-            <select id="cpart" value={carvePart} onChange={(e) => useRecover.setState({ carvePart: e.target.value })}>
-              <option value="">The whole source</option>
-              {parts.map((p) => (
-                <option key={p.start_lba} value={String(p.start_lba)}>
-                  {partitionLabel(p, fmtBytes)}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="panel-head">
+            <h3>Search in</h3>
+            <Button small disabled={!!running || !source} onClick={() => void startScan(source, false)}>
+              Rescan
+            </Button>
+          </div>
+          <PartitionPicker
+            id="carve"
+            parts={parts}
+            size={result?.deviceSize ?? null}
+            source={source}
+            selected={carvePart === "" ? null : Number(carvePart)}
+            onSelect={(v) => useRecover.setState({ carvePart: v === null ? "" : String(v) })}
+            whole="The whole source"
+          />
         </div>
-        <Hint>Limiting the search to one partition is faster and avoids matches from other volumes.</Hint>
+        <Hint flush>Limiting the search to one partition is faster and avoids matches from other volumes.</Hint>
 
         <Field
           id="cout"

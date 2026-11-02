@@ -9,10 +9,12 @@ use std::fs::OpenOptions;
 use std::io::{self, Write as _};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
+use sf_core::device::Access;
 use sf_core::partitions;
 use sf_core::{BlockDevice, Confidence, FsKind, Imager, ImagerConfig, MapFile, PartitionSource, Progress, Status, TableKind};
 
@@ -21,12 +23,26 @@ const CONTRACT_VERSION: u32 = 2;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(5);
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(200);
 
+/// --access and --timeout, set once in `run`. A static rather than an
+/// argument because every command opens devices, some from worker threads.
+static IO: RwLock<(Access, Duration)> = RwLock::new((Access::Os, Duration::from_secs(10)));
+
 #[derive(Parser)]
 #[command(name = "sf-cli", about = "SectorForge command-line imaging engine", version)]
 struct Cli {
     /// Emit newline-delimited JSON events on stdout (see docs/cli-contract.md).
     #[arg(long, global = true)]
     json: bool,
+
+    /// How physical drives are read: os (through the OS disk driver), scsi
+    /// (SCSI READ pass-through) or ata (ATA READ DMA EXT pass-through). The
+    /// pass-through modes skip the driver's own retries. Ignored for image files.
+    #[arg(long, global = true, default_value = "os", value_parser = parse_access)]
+    access: Access,
+
+    /// Seconds before a single pass-through read gives up (scsi/ata only).
+    #[arg(long, global = true, default_value_t = 10, value_parser = clap::value_parser!(u64).range(1..=3600))]
+    timeout: u64,
 
     #[command(subcommand)]
     command: Command,
@@ -59,6 +75,9 @@ enum Command {
         /// Skip the fast first pass; only retry known-damaged regions.
         #[arg(long)]
         retry_only: bool,
+        /// Run the fast first pass from the end of the drive backwards.
+        #[arg(long)]
+        reverse: bool,
     },
     /// Print a summary of a mapfile's current state.
     Status {
@@ -216,12 +235,37 @@ fn open_device(path: &str) -> anyhow::Result<Box<dyn BlockDevice>> {
     })
 }
 
+fn parse_access(s: &str) -> Result<Access, String> {
+    match s.to_ascii_lowercase().as_str() {
+        "os" => Ok(Access::Os),
+        "scsi" => Ok(Access::Scsi),
+        "ata" => Ok(Access::Ata),
+        _ => Err(format!("unknown access mode '{s}': use os, scsi or ata")),
+    }
+}
+
+fn access_name(a: Access) -> &'static str {
+    match a {
+        Access::Os => "os",
+        Access::Scsi => "scsi",
+        Access::Ata => "ata",
+    }
+}
+
 fn open_device_inner(path: &str) -> io::Result<Box<dyn BlockDevice>> {
     if is_raw_device_path(path) {
+        let (access, timeout) = *IO.read().unwrap_or_else(|e| e.into_inner());
         #[cfg(windows)]
-        return Ok(Box::new(sf_core::device::WindowsPhysicalDrive::open(path)?));
+        return Ok(Box::new(sf_core::device::WindowsPhysicalDrive::open_with(path, access, timeout)?));
         #[cfg(target_os = "linux")]
-        return Ok(Box::new(sf_core::device::LinuxBlockDevice::open(path)?));
+        {
+            // ponytail: Linux has no pass-through yet; SG_IO (SCSI READ / ATA PASS-THROUGH(16)) would add it.
+            let _ = timeout;
+            if access != Access::Os {
+                return Err(io::Error::new(io::ErrorKind::Unsupported, "SCSI/ATA pass-through isn't available on Linux yet; use --access os"));
+            }
+            return Ok(Box::new(sf_core::device::LinuxBlockDevice::open(path)?));
+        }
         #[cfg(not(any(windows, target_os = "linux")))]
         return Err(io::Error::new(io::ErrorKind::Unsupported, "no raw device backend for this platform yet"));
     }
@@ -346,6 +390,7 @@ struct ImageArgs {
     skip_size: u64,
     retries: u32,
     retry_only: bool,
+    reverse: bool,
 }
 
 fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
@@ -392,6 +437,7 @@ fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
         "event": "start",
         "source": a.source,
         "mode": mode_name(&a.source),
+        "access": if is_raw_device_path(&a.source) { access_name(IO.read().unwrap_or_else(|e| e.into_inner()).0) } else { "file" },
         "size": size,
         "sector_size": sector_size,
         "resumed": resumed,
@@ -399,12 +445,18 @@ fn run_image(out: Out, a: ImageArgs) -> anyhow::Result<()> {
 
     out.phase(format!("Setting aside {} for the destination image", format_bytes(size)));
     let dest_file = OpenOptions::new().write(true).create(true).truncate(false).open(&a.dest)?;
+    if a.reverse {
+        // Without this, the first write (at the end) waits while Windows zero-fills the whole image.
+        // Best effort: FAT/exFAT can't do sparse files, and then the run is only slow to start.
+        let _ = sf_core::device::make_sparse(&dest_file);
+    }
     dest_file.set_len(size)?;
 
     let config = ImagerConfig {
         initial_chunk: a.chunk_size,
         skip_size: a.skip_size,
         max_retries: a.retries,
+        reverse: a.reverse,
     };
     let mut imager = Imager::new(device, dest_file, map, config).with_checkpoint(&a.map, CHECKPOINT_INTERVAL);
 
@@ -614,6 +666,7 @@ where
         }
     };
     let out = Out { json: cli.json };
+    *IO.write().unwrap_or_else(|e| e.into_inner()) = (cli.access, Duration::from_secs(cli.timeout));
     let result = match cli.command {
         Command::Image {
             source,
@@ -623,6 +676,7 @@ where
             skip_size,
             retries,
             retry_only,
+            reverse,
         } => run_image(
             out,
             ImageArgs {
@@ -633,6 +687,7 @@ where
                 skip_size,
                 retries,
                 retry_only,
+                reverse,
             },
         ),
         Command::Status { map } => run_status(out, &map),

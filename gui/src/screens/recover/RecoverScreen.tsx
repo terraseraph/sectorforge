@@ -1,12 +1,15 @@
+import { useEffect } from "react";
 import { DrivePicker } from "../../components/DrivePicker";
 import { ErrorAlert } from "../../components/Shell";
 import { Button, Field, Hint, Notice, Panel, TextInput } from "../../components/ui";
 import { dialogs } from "../../lib/api";
 import { isDevicePath } from "../../lib/format";
-import { recoverMap } from "../../store/actions";
+import { recoverMap, startScan } from "../../store/actions";
+import { useApp } from "../../store/app";
 import { useRecoverSourceInput } from "../../store/hooks";
 import { useImage } from "../../store/image";
 import { useRecover } from "../../store/recover";
+import { partitionsFor, useScan } from "../../store/scan";
 import { CarveTab } from "./CarveTab";
 import { FilesTab } from "./FilesTab";
 
@@ -15,11 +18,28 @@ const TABS = [
   { id: "carve", label: "Carve by file type" },
 ] as const;
 
+/** Reads the partition table once a source is settled on, unless it is already known, a job is running, or it failed before (Rescan retries). */
+function autoScan(src: string) {
+  const s = src.trim();
+  const scan = useScan.getState();
+  if (!s || partitionsFor(scan.result, s) || scan.errors[s.toLowerCase()] || useApp.getState().running) return;
+  void startScan(s, false);
+}
+
 export function RecoverScreen() {
   const tab = useRecover((s) => s.tab);
   const input = useRecoverSourceInput();
   const source = input.trim();
   const setSource = (v: string) => useRecover.setState({ source: v, sourceEdited: true });
+  const pickSource = (v: string) => {
+    setSource(v);
+    autoScan(v);
+  };
+
+  // Arriving with a source chosen elsewhere (e.g. the drive inspector): read it straight away.
+  useEffect(() => {
+    if (useRecover.getState().sourceEdited) autoScan(source);
+  }, []);
 
   return (
     <>
@@ -30,7 +50,7 @@ export function RecoverScreen() {
       <ErrorAlert />
       <div className="cols">
         <div>
-          <DrivePicker selected={input} onPick={setSource} />
+          <DrivePicker selected={input} onPick={pickSource} />
         </div>
         <div>
           <Panel label="Source">
@@ -41,14 +61,17 @@ export function RecoverScreen() {
                 <Button
                   onClick={async () => {
                     const v = await dialogs.openFile("Choose an image file");
-                    if (v !== null) setSource(v);
+                    if (v !== null) pickSource(v);
                   }}
                 >
                   Browse
                 </Button>
               }
             >
-              <TextInput id="rsrc" value={input} placeholder="\\.\PhysicalDrive1, /dev/sdb, or an image file" onChange={(e) => setSource(e.target.value)} />
+              <TextInput id="rsrc" value={input} placeholder="\\.\PhysicalDrive1, /dev/sdb, or an image file" onChange={(e) => setSource(e.target.value)}
+                onBlur={() => autoScan(input)}
+                onKeyDown={(e) => e.key === "Enter" && autoScan(input)}
+              />
             </Field>
             <SourceNotes source={source} />
           </Panel>

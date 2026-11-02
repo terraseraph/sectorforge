@@ -1,9 +1,10 @@
 import { useEffect } from "react";
+import { PartitionPicker } from "../../components/PartitionPicker";
 import { JobActivity } from "../../components/Shell";
 import { Button, Check, Field, Hint, Panel, ProgressBar, TextInput } from "../../components/ui";
 import { dialogs } from "../../lib/api";
-import { fmtBytes, fmtCount, percent } from "../../lib/format";
-import { canBrowse, partitionLabel } from "../../lib/recoverlogic";
+import { fmtCount, percent } from "../../lib/format";
+import { canBrowse } from "../../lib/recoverlogic";
 import { startExtract, startListing, startScan, stopExtract, stopListing } from "../../store/actions";
 import { useApp } from "../../store/app";
 import { files, selection, useRecover } from "../../store/recover";
@@ -31,36 +32,25 @@ export function FilesTab({ source }: { source: string }) {
       <Panel label="Partition to list">
         <p className="lead flush">
           Reads the volume's file table (NTFS, FAT, exFAT or ext) and lists every file and folder it still describes, including deleted ones,
-          with their names, folders and dates. Press <b>Scan source</b> to find the partitions, pick one, then <b>List files</b>. Tick what
+          with their names, folders and dates. Pick a partition, then <b>List files</b>. Tick what
           you want and extract it to another drive. FAT keeps no map of a deleted file's pieces, so deleted FAT files are read as one piece,
           and ext3/ext4 usually wipe where a deleted file was: for those, carving often does better.
         </p>
-        <Field
-          id="part"
-          label="Partition"
-          action={
-            <Button disabled={!!running} onClick={() => void startScan(source, false)}>
-              Scan source
-            </Button>
-          }
-        >
-          <select
-            id="part"
-            value={lba ?? ""}
-            onChange={(e) => useRecover.setState({ lba: e.target.value === "" ? null : Number(e.target.value) })}
-          >
-            {parts && parts.length ? (
-              parts.map((p) => (
-                <option key={p.start_lba} value={p.start_lba} disabled={!canBrowse(p)}>
-                  {partitionLabel(p, fmtBytes)}
-                  {canBrowse(p) ? "" : " (no readable filesystem: use carving)"}
-                </option>
-              ))
-            ) : (
-              <option value="">No partitions known for this source yet. Press Scan source.</option>
-            )}
-          </select>
-        </Field>
+        <div className="panel-head">
+          <h3>Partition</h3>
+          <Button small disabled={!!running || !source} onClick={() => void startScan(source, false)}>
+            Rescan
+          </Button>
+        </div>
+        <PartitionPicker
+          id="files"
+          parts={parts}
+          size={result?.deviceSize ?? null}
+          source={source}
+          selected={lba}
+          onSelect={(v) => useRecover.setState({ lba: v })}
+          unusable={(p) => (canBrowse(p) ? null : "No readable filesystem: use carving")}
+        />
         <Check checked={deletedOnlyRun} onChange={(on) => useRecover.setState({ deletedOnlyRun: on })}>
           Only list deleted files (quicker on very large volumes)
         </Check>

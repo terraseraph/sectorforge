@@ -39,6 +39,11 @@ struct ImageArgs {
     retries: Option<u32>,
     #[serde(default)]
     retry_only: bool,
+    /// "os", "scsi" or "ata"; sf-cli rejects anything else.
+    access: Option<String>,
+    timeout: Option<u64>,
+    #[serde(default)]
+    reverse: bool,
 }
 
 /// `file` events can number in the millions; they go to the UI in batches.
@@ -111,8 +116,13 @@ fn start_image(app: AppHandle, jobs: State<Jobs>, a: ImageArgs) -> Result<(), St
     push_opt(&mut args, "--chunk-size", a.chunk_size.map(|v| v.to_string()));
     push_opt(&mut args, "--skip-size", a.skip_size.map(|v| v.to_string()));
     push_opt(&mut args, "--retries", a.retries.map(|v| v.to_string()));
+    push_opt(&mut args, "--access", a.access);
+    push_opt(&mut args, "--timeout", a.timeout.map(|v| v.to_string()));
     if a.retry_only {
         args.push("--retry-only".into());
+    }
+    if a.reverse {
+        args.push("--reverse".into());
     }
     args.push("--json".into());
     start(app, jobs.image.clone(), "image", args, None)
@@ -429,6 +439,80 @@ fn parse_restore(args: &[String]) -> Option<Restore> {
     Some(r)
 }
 
+/// A place the in-app file picker can start from: a drive letter on Windows, `/` or home on Linux.
+#[derive(Serialize)]
+struct Place {
+    path: String,
+    label: String,
+    free: Option<u64>,
+    total: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct DirEntry {
+    name: String,
+    dir: bool,
+    size: u64,
+}
+
+#[tauri::command]
+fn list_places() -> Vec<Place> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetVolumeInformationW};
+        (b'A'..=b'Z')
+            .map(|l| format!("{}:\\", l as char))
+            .filter(|p| std::path::Path::new(p).exists())
+            .map(|path| {
+                let wide: Vec<u16> = std::ffi::OsStr::new(&path).encode_wide().chain([0]).collect();
+                let (mut free, mut total) = (0u64, 0u64);
+                let mut name = [0u16; 261];
+                let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, std::ptr::null_mut()) } != 0;
+                let named = unsafe {
+                    GetVolumeInformationW(wide.as_ptr(), name.as_mut_ptr(), name.len() as u32, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0)
+                } != 0;
+                let label = if named { String::from_utf16_lossy(&name[..name.iter().position(|&c| c == 0).unwrap_or(0)]) } else { String::new() };
+                Place { path, label, free: ok.then_some(free), total: ok.then_some(total) }
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        // ponytail: no free space on Linux yet (statvfs would add it).
+        let mut places = vec![Place { path: "/".into(), label: "Computer".into(), free: None, total: None }];
+        if let Some(home) = std::env::var_os("HOME") {
+            places.push(Place { path: home.to_string_lossy().into_owned(), label: "Home".into(), free: None, total: None });
+        }
+        places
+    }
+}
+
+/// Folders, then files, in `path`, by name. Hidden and system entries and ones that can't be read are left out.
+#[tauri::command]
+fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
+    let rd = std::fs::read_dir(&path).map_err(|e| format!("Can't open {path}: {e}"))?;
+    let mut out: Vec<DirEntry> = rd
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let md = e.metadata().ok()?;
+            #[cfg(windows)]
+            let hidden = std::os::windows::fs::MetadataExt::file_attributes(&md) & 0x6 != 0; // HIDDEN | SYSTEM
+            #[cfg(not(windows))]
+            let hidden = name.starts_with('.');
+            (!hidden).then(|| DirEntry { name, dir: md.is_dir(), size: if md.is_dir() { 0 } else { md.len() } })
+        })
+        .collect();
+    out.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    Ok(out)
+}
+
+#[tauri::command]
+fn create_folder(path: String) -> Result<(), String> {
+    std::fs::create_dir(&path).map_err(|e| format!("Can't create {path}: {e}"))
+}
+
 /// Set when this instance was relaunched by `restart_as_admin`.
 #[tauri::command]
 fn startup_restore() -> Option<Restore> {
@@ -568,6 +652,9 @@ fn bridge_invoke(app: &AppHandle, cmd: &str, args: serde_json::Value) -> Result<
         "list_types" => to(block_on(list_types())?),
         "get_status" => to(block_on(get_status(arg(&args, "map")?))?),
         "startup_restore" => to(startup_restore()),
+        "list_places" => to(list_places()),
+        "list_dir" => to(list_dir(arg(&args, "path")?)?),
+        "create_folder" => to(create_folder(arg(&args, "path")?)?),
         "start_image" => to(start_image(a, jobs(), arg(&args, "a")?)?),
         "stop_image" => to(stop_image(jobs())),
         "start_scan" => to(start_scan(a, jobs(), arg(&args, "source")?, arg(&args, "deep")?)?),
@@ -615,7 +702,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_image, stop_image, start_scan, stop_scan, start_hash, stop_hash, start_survey, get_status,
             start_carve, stop_carve, start_files, stop_files, start_extract, stop_extract,
-            cli_info, list_devices, list_types, startup_restore, restart_as_admin
+            cli_info, list_devices, list_types, startup_restore, restart_as_admin, list_places, list_dir, create_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running SectorForge");

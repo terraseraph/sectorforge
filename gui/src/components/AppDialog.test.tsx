@@ -16,18 +16,3 @@ test("the read-drive question is an in-app dialog: OK says yes, Escape says no",
   fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
   expect(await answer).toBe(false);
 });
-
-test("in a browser tab, Browse asks for the path in the dialog", async () => {
-  render(<AppDialog />);
-
-  const path = act(() => dialogs.saveFile("Map file", "E:\\rescue\\disk.map"));
-  const input = await screen.findByRole("textbox", { name: "Map file" });
-  expect(input).toHaveValue("E:\\rescue\\disk.map");
-  fireEvent.change(input, { target: { value: "F:\\disk.map" } });
-  fireEvent.click(screen.getByRole("button", { name: "OK" }));
-  expect(await path).toBe("F:\\disk.map");
-
-  const cancelled = act(() => dialogs.openFile("Choose an image file"));
-  fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-  expect(await cancelled).toBeNull();
-});

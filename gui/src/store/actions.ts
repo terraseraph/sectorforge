@@ -136,7 +136,7 @@ export async function startImage() {
   if (systemDriveBlocked(app())) {
     return showError("That is your system drive. Tick the box under the Source field if you really mean to image it.");
   }
-  const { chunkKiB, skipKiB, retries, retryOnly } = useImage.getState();
+  const { chunkBytes, skipBytes, retries, retryOnly, access, timeoutSecs, reverse } = useImage.getState();
   if (!begin("image", `Starting: opening ${source.trim()}...`)) return;
   useImage.setState({ pass: "–" });
   try {
@@ -144,10 +144,13 @@ export async function startImage() {
       source: source.trim(),
       dest: dest.trim(),
       map: map.trim(),
-      chunkSize: positive(chunkKiB, 1024) * 1024,
-      skipSize: positive(skipKiB, 1024) * 1024,
+      chunkSize: Math.max(512, positive(chunkBytes, 1048576)),
+      skipSize: Math.max(512, positive(skipBytes, 1048576)),
       retries: Number.isFinite(retries) && retries >= 0 ? Math.floor(retries) : 3,
       retryOnly,
+      access,
+      timeout: Math.min(positive(timeoutSecs, 10), 3600),
+      reverse,
     });
   } catch (e) {
     return rollback(e);

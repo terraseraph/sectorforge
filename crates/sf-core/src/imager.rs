@@ -23,6 +23,9 @@ pub struct ImagerConfig {
     /// How many times to retry a single sector before giving up on it as
     /// genuinely bad.
     pub max_retries: u32,
+    /// Sweep the first pass from the end of the drive towards the start.
+    /// Reading a damaged area from the other side often gets more of it.
+    pub reverse: bool,
 }
 
 impl Default for ImagerConfig {
@@ -31,6 +34,7 @@ impl Default for ImagerConfig {
             initial_chunk: 1024 * 1024, // 1 MiB
             skip_size: 1024 * 1024,
             max_retries: 3,
+            reverse: false,
         }
     }
 }
@@ -132,11 +136,17 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
     /// into *why* a chunk failed. This is what gets the bulk of a failing
     /// drive's data off quickly, before the drive gets any worse.
     pub fn run_copy_pass(&mut self, mut on_progress: impl FnMut(Progress)) -> io::Result<()> {
+        if self.config.reverse {
+            return self.run_reverse_copy_pass(on_progress);
+        }
         let sector = self.device.sector_size();
         let mut pos = align_down(self.map.current_pos, sector);
 
         loop {
-            let Some((found_pos, avail)) = self.map.find_next(pos, &[Status::NonTried]) else {
+            // Wrap to the start: a resumed run (or one that last ran in
+            // reverse) can leave untried areas before current_pos.
+            let next = self.map.find_next(pos, &[Status::NonTried]).or_else(|| self.map.find_next(0, &[Status::NonTried]));
+            let Some((found_pos, avail)) = next else {
                 break;
             };
             pos = found_pos;
@@ -162,6 +172,48 @@ impl<D: BlockDevice, W: Write + Seek> Imager<D, W> {
             }
 
             self.map.current_pos = pos;
+            self.map.current_status = Status::NonTried;
+            self.checkpoint(false)?;
+            on_progress(self.progress());
+        }
+        self.checkpoint(true)
+    }
+
+    /// Phase 1 run backwards: the same as [`run_copy_pass`](Self::run_copy_pass),
+    /// but each chunk is read ending where the last one started.
+    fn run_reverse_copy_pass(&mut self, mut on_progress: impl FnMut(Progress)) -> io::Result<()> {
+        let sector = self.device.sector_size();
+        let size = self.map.size();
+        // current_pos is the lowest point a reverse run reached; 0 means a fresh map.
+        let mut end = match self.map.current_pos {
+            0 => size,
+            p => align_down(p, sector),
+        };
+
+        loop {
+            let prev = self.map.find_prev(end, &[Status::NonTried]).or_else(|| self.map.find_prev(size, &[Status::NonTried]));
+            let Some((start, avail)) = prev else {
+                break;
+            };
+            end = start + avail;
+
+            let chunk_len = align_chunk_len(self.config.initial_chunk.min(avail), sector).min(avail);
+            let pos = end - chunk_len;
+            let mut buf = AlignedBuf::new(chunk_len as usize, sector as usize);
+            match self.device.read_at(pos, &mut buf) {
+                Ok(()) => {
+                    self.write_chunk(pos, &buf)?;
+                    self.map.mark(pos, chunk_len, Status::Finished);
+                    end = pos;
+                }
+                Err(_) => {
+                    let skip = align_chunk_len(self.config.skip_size.max(chunk_len), sector).min(avail);
+                    self.map.mark(end - skip, skip, Status::NonTrimmed);
+                    end -= skip;
+                }
+            }
+
+            self.map.current_pos = end;
             self.map.current_status = Status::NonTried;
             self.checkpoint(false)?;
             on_progress(self.progress());
@@ -264,6 +316,7 @@ mod tests {
             initial_chunk: 2048,
             skip_size: 2048,
             max_retries: 3,
+            reverse: false,
         };
         let mut imager = Imager::new(device, dest, map, config);
         imager.run_copy_pass(|_| {}).unwrap();
@@ -284,6 +337,7 @@ mod tests {
             initial_chunk: 4096,
             skip_size: 4096,
             max_retries: 2,
+            reverse: false,
         };
         let mut imager = Imager::new(device, dest, map, config);
         imager.run_copy_pass(|_| {}).unwrap();
@@ -311,6 +365,7 @@ mod tests {
             initial_chunk: 1024,
             skip_size: 1024,
             max_retries: 1,
+            reverse: false,
         };
         let mut imager = Imager::new(make_device(8192, 512), Cursor::new(vec![0u8; 8192]), MapFile::new_non_tried(8192), config)
             .with_checkpoint(&map_path, Duration::ZERO);
@@ -330,6 +385,37 @@ mod tests {
         let mid = seen_mid_pass.expect("callback saw the halfway point");
         assert_eq!(mid.bytes_with_status(Status::Finished), 4096);
         assert_eq!(mid.current_pos, 4096);
+    }
+
+    #[test]
+    fn reverse_copy_reads_end_first_and_still_isolates_bad_sectors() {
+        let mut device = make_device(8192, 512);
+        device.mark_bad(3072, 4096);
+        let expected = (0..8192u64).map(|i| (i % 251) as u8).collect::<Vec<u8>>();
+        let config = ImagerConfig { initial_chunk: 2048, skip_size: 2048, max_retries: 2, reverse: true };
+        let mut imager = Imager::new(device, Cursor::new(vec![0u8; 8192]), MapFile::new_non_tried(8192), config);
+
+        let mut first = None;
+        imager.run_copy_pass(|p| _ = first.get_or_insert(p.bytes_rescued)).unwrap();
+        assert_eq!(first, Some(2048)); // the last chunk, read first
+        assert_eq!(imager.map().current_pos, 0);
+        assert_eq!(imager.map().bytes_with_status(Status::NonTried), 0);
+
+        imager.run_retry_pass(|_| {}).unwrap();
+        assert_eq!(imager.map().bytes_with_status(Status::BadSector), 1024);
+        let out = imager.dest.get_ref();
+        assert_eq!(&out[..3072], &expected[..3072]);
+        assert_eq!(&out[4096..], &expected[4096..]);
+    }
+
+    #[test]
+    fn a_forward_run_picks_up_untried_areas_a_reverse_run_left_before_current_pos() {
+        let mut map = MapFile::new_non_tried(4096);
+        map.mark(2048, 2048, Status::Finished); // a reverse run did the top half, then stopped
+        map.current_pos = 2048;
+        let mut imager = Imager::new(make_device(4096, 512), Cursor::new(vec![0u8; 4096]), map, ImagerConfig::default());
+        imager.run_copy_pass(|_| {}).unwrap();
+        assert_eq!(imager.map().bytes_with_status(Status::Finished), 4096);
     }
 
     #[test]

@@ -178,6 +178,16 @@ impl MapFile {
         None
     }
 
+    /// The mirror of [`find_next`](Self::find_next): the last region with one
+    /// of `statuses` that starts before `before`, clipped to end there.
+    pub fn find_prev(&self, before: u64, statuses: &[Status]) -> Option<(u64, u64)> {
+        self.blocks
+            .iter()
+            .rev()
+            .find(|b| b.pos < before && statuses.contains(&b.status))
+            .map(|b| (b.pos, b.end().min(before) - b.pos))
+    }
+
     pub fn to_ddrescue_string(&self) -> String {
         let mut out = String::new();
         out.push_str("# Mapfile. Created by SectorForge\n");
@@ -379,6 +389,16 @@ mod tests {
         assert_eq!(m.find_next(0, &[Status::NonTried]), Some((500, 500)));
         assert_eq!(m.find_next(700, &[Status::NonTried]), Some((700, 300)));
         assert_eq!(m.find_next(0, &[Status::BadSector]), None);
+    }
+
+    #[test]
+    fn find_prev_mirrors_find_next() {
+        let mut m = MapFile::new_non_tried(1000);
+        m.mark(500, 500, Status::Finished);
+        assert_eq!(m.find_prev(1000, &[Status::NonTried]), Some((0, 500)));
+        assert_eq!(m.find_prev(300, &[Status::NonTried]), Some((0, 300)));
+        assert_eq!(m.find_prev(0, &[Status::NonTried]), None);
+        assert_eq!(m.find_prev(1000, &[Status::BadSector]), None);
     }
 
     #[test]

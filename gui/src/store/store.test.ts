@@ -56,6 +56,16 @@ describe("starting jobs", () => {
     expect(api.startImage).toHaveBeenCalledWith(expect.objectContaining({ chunkSize: 1024 * 1024, skipSize: 1024 * 1024, retries: 3 }));
   });
 
+  test("image passes the access mode, timeout and direction, defaulting to OS forwards", async () => {
+    fill();
+    await startImage();
+    expect(api.startImage).toHaveBeenLastCalledWith(expect.objectContaining({ access: "os", timeout: 10, reverse: false }));
+    useImage.setState({ access: "ata", timeoutSecs: 99999, reverse: true });
+    useApp.setState({ running: null });
+    await startImage();
+    expect(api.startImage).toHaveBeenLastCalledWith(expect.objectContaining({ access: "ata", timeout: 3600, reverse: true }));
+  });
+
   test("a rejected start rolls back and shows the reason", async () => {
     fill();
     vi.mocked(api.startImage).mockRejectedValue("sf-cli was not found");

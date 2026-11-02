@@ -1,12 +1,13 @@
+import { useEffect, useState } from "react";
 import { DrivePicker } from "../components/DrivePicker";
 import { HealthMap } from "../components/HealthMap";
 import { ErrorAlert, JobActivity } from "../components/Shell";
 import { Button, Check, Field, Hint, Notice, Panel, TextInput } from "../components/ui";
-import { dialogs } from "../lib/api";
-import { systemDriveFor } from "../lib/devices";
+import { type Access, dialogs } from "../lib/api";
+import { findDevice, mapPathFor, suggestImageName, systemDriveFor } from "../lib/devices";
 import { mapChanged, pauseImage, startImage } from "../store/actions";
 import { confirmKey, systemDriveBlocked, useApp } from "../store/app";
-import { useImage } from "../store/image";
+import { PRESETS, useImage } from "../store/image";
 
 const setApp = useApp.setState;
 
@@ -47,8 +48,23 @@ export function ImageScreen() {
             </Hint>
             <SystemDriveGuard />
 
-            <Field id="dst" label="Destination" action={<Button onClick={async () => pick(await dialogs.saveFile("Destination image file"), "dest")}>Choose</Button>}>
-              <TextInput id="dst" value={dest} onChange={(e) => setApp({ dest: e.target.value })} />
+            <Field
+              id="dst"
+              label="Destination"
+              action={
+                <Button
+                  onClick={async () => {
+                    const devices = useApp.getState().devices;
+                    const need = findDevice(devices, source)?.size ?? undefined;
+                    const v = await dialogs.saveFile("Destination image file", dest || suggestImageName(devices, source), need);
+                    if (v !== null && setDest(v)) mapChanged();
+                  }}
+                >
+                  Choose
+                </Button>
+              }
+            >
+              <TextInput id="dst" value={dest} onChange={(e) => setDest(e.target.value)} onBlur={() => map === mapPathFor(dest) && mapChanged()} />
             </Field>
             <Hint>Save the image on a different drive from the one you are rescuing. SectorForge refuses to write onto the source drive.</Hint>
 
@@ -109,6 +125,14 @@ export function ImageScreen() {
   );
 }
 
+/** Sets the destination; the map follows it while the map is empty or still named after the old destination. Returns whether it followed. */
+function setDest(dest: string): boolean {
+  const s = useApp.getState();
+  const follows = !s.map.trim() || s.map === mapPathFor(s.dest);
+  setApp(follows && dest.trim() ? { dest, map: mapPathFor(dest) } : { dest });
+  return follows;
+}
+
 function pick(value: string | null, field: "source" | "dest" | "map"): boolean {
   if (value === null) return false;
   setApp({ [field]: value });
@@ -137,31 +161,112 @@ function SystemDriveGuard() {
 }
 
 function AdvancedSettings() {
-  const chunkKiB = useImage((s) => s.chunkKiB);
-  const skipKiB = useImage((s) => s.skipKiB);
+  const chunkBytes = useImage((s) => s.chunkBytes);
+  const skipBytes = useImage((s) => s.skipBytes);
   const retries = useImage((s) => s.retries);
+  const access = useImage((s) => s.access);
+  const timeoutSecs = useImage((s) => s.timeoutSecs);
+  const reverse = useImage((s) => s.reverse);
   const set = useImage.setState;
+  const active = PRESETS.find((p) => p.s.chunkBytes === chunkBytes && p.s.skipBytes === skipBytes && p.s.retries === retries && p.s.timeoutSecs === timeoutSecs);
   return (
     <details>
       <summary>Advanced</summary>
+      <div className="presets" role="radiogroup" aria-label="Presets">
+        {PRESETS.map((p) => (
+          <button key={p.id} type="button" role="radio" aria-checked={active?.id === p.id} className="preset" onClick={() => set(p.s)}>
+            {p.label}
+          </button>
+        ))}
+      </div>
+      <Hint flush>{active ? active.hint : "Custom settings."}</Hint>
       <div className="adv">
         <div>
-          <label htmlFor="chunk">Chunk size (KiB)</label>
-          <input id="chunk" type="number" min={1} value={chunkKiB} onChange={(e) => set({ chunkKiB: e.target.valueAsNumber })} />
+          <label htmlFor="chunk">Read size (fast pass)</label>
+          <SizeInput id="chunk" bytes={chunkBytes} onChange={(b) => set({ chunkBytes: b })} />
         </div>
         <div>
-          <label htmlFor="skip">Skip size (KiB)</label>
-          <input id="skip" type="number" min={1} value={skipKiB} onChange={(e) => set({ skipKiB: e.target.valueAsNumber })} />
+          <label htmlFor="skip">Jump past a bad read</label>
+          <SizeInput id="skip" bytes={skipBytes} onChange={(b) => set({ skipBytes: b })} />
         </div>
         <div>
           <label htmlFor="retries">Retries per sector</label>
           <input id="retries" type="number" min={0} value={retries} onChange={(e) => set({ retries: e.target.valueAsNumber })} />
         </div>
       </div>
-      <Hint flush>Defaults suit most drives. A bigger skip size gets more data off a badly damaged drive sooner.</Hint>
+      <Hint flush>A bigger jump gets more data off a badly damaged drive sooner; the retry pass comes back for what was skipped.</Hint>
+      <div className="adv">
+        <div>
+          <label htmlFor="access">Read the drive through</label>
+          <select id="access" value={access} onChange={(e) => set({ access: e.target.value as Access })}>
+            <option value="os">Windows / OS (default)</option>
+            <option value="scsi">SCSI pass-through</option>
+            <option value="ata">ATA pass-through</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="timeout">Read timeout (seconds)</label>
+          <input
+            id="timeout"
+            type="number"
+            min={1}
+            max={3600}
+            disabled={access === "os"}
+            value={timeoutSecs}
+            onChange={(e) => set({ timeoutSecs: e.target.valueAsNumber })}
+          />
+        </div>
+      </div>
+      <Hint flush>{ACCESS_HINT[access]}</Hint>
+      <Check checked={reverse} onChange={(on) => set({ reverse: on })}>
+        Read backwards (fast pass goes from the end of the drive to the start)
+      </Check>
     </details>
   );
 }
+
+const UNITS = [
+  { label: "bytes", size: 1 },
+  { label: "sectors (512 B)", size: 512 },
+  { label: "KiB", size: 1024 },
+  { label: "MiB", size: 1024 * 1024 },
+] as const;
+
+/** The biggest unit `bytes` is a whole number of. */
+const unitFor = (bytes: number) => [...UNITS].reverse().find((u) => bytes >= u.size && bytes % u.size === 0)?.size ?? 1;
+
+/** A size in bytes, typed in the unit picked beside it. */
+function SizeInput({ id, bytes, onChange }: { id: string; bytes: number; onChange: (bytes: number) => void }) {
+  const [unit, setUnit] = useState(() => unitFor(bytes));
+  // A preset can set a size the current unit can't show as a whole number.
+  useEffect(() => {
+    if (Number.isFinite(bytes) && bytes % unit !== 0) setUnit(unitFor(bytes));
+  }, [bytes, unit]);
+  return (
+    <div className="size-input">
+      <input
+        id={id}
+        type="number"
+        min={1}
+        value={Number.isFinite(bytes) ? bytes / unit : ""}
+        onChange={(e) => onChange(Math.round(e.target.valueAsNumber * unit))}
+      />
+      <select aria-label="Unit" value={unit} onChange={(e) => setUnit(Number(e.target.value))}>
+        {UNITS.map((u) => (
+          <option key={u.size} value={u.size}>
+            {u.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+const ACCESS_HINT: Record<Access, string> = {
+  os: "Reads go through the operating system's disk driver. Works with every drive and image file, but on a bad sector the driver can retry for minutes before giving up.",
+  scsi: "Sends SCSI READ commands straight to the drive with your timeout, so a bad sector costs seconds, not minutes. Works with most SATA, SAS and USB drives. Image files ignore this.",
+  ata: "Sends ATA READ commands straight to the drive with your timeout. For SATA drives on a SATA port; NVMe drives and most USB enclosures don't support it. Image files ignore this.",
+};
 
 function Tiles() {
   const tiles = useImage((s) => s.tiles);

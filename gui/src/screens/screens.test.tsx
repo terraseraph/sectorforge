@@ -4,13 +4,17 @@ import { resetStores } from "../test/reset";
 
 vi.mock("../lib/api", async (orig) => {
   const real = await orig<typeof import("../lib/api")>();
-  return { ...real, api: { listDevices: vi.fn(), restartAsAdmin: vi.fn(), getStatus: vi.fn() }, dialogs: {} };
+  return { ...real, api: { listDevices: vi.fn(), restartAsAdmin: vi.fn(), getStatus: vi.fn(), startScan: vi.fn() }, dialogs: {} };
 });
 
+const { useImage } = await import("../store/image");
 const { useApp } = await import("../store/app");
 const { useRecover, files, selection } = await import("../store/recover");
 const { onFiles } = await import("../store/events");
 const { ImageScreen } = await import("./ImageScreen");
+const { RecoverScreen } = await import("./recover/RecoverScreen");
+const { api } = await import("../lib/api");
+const { useScan } = await import("../store/scan");
 const { FileBrowser } = await import("./recover/FileBrowser");
 
 beforeEach(resetStores);
@@ -45,6 +49,18 @@ describe("Image screen", () => {
     useApp.setState({ cli: { path: "", searched: [], found: true, version: "0.2.0", contract: 2, problem: null, platform: "windows", pkexec: false } });
     render(<ImageScreen />);
     expect(screen.getByRole("button", { name: "Restart as Administrator" })).toBeInTheDocument();
+  });
+
+  test("a preset fills the advanced settings, shown in fitting units; editing makes them custom", () => {
+    render(<ImageScreen />);
+    expect(screen.getByRole("radio", { name: "Some bad sectors" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("radio", { name: "Badly damaged" }));
+    expect(screen.getByLabelText("Read size (fast pass)")).toHaveValue(64);
+    expect(screen.getAllByRole("combobox", { name: "Unit" })[0]).toHaveValue("1024");
+    expect(screen.getByLabelText("Jump past a bad read")).toHaveValue(16);
+    fireEvent.change(screen.getByLabelText("Retries per sector"), { target: { value: "5" } });
+    expect(screen.getByText("Custom settings.")).toBeInTheDocument();
+    expect(useImage.getState()).toMatchObject({ chunkBytes: 64 * 1024, skipBytes: 16 * 1024 * 1024, retries: 5 });
   });
 });
 
@@ -115,5 +131,21 @@ describe("file browser", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Images" }));
     expect(screen.getByText('<img src=x onerror="alert(1)">.jpg')).toBeInTheDocument();
     expect(screen.queryByText("notes.txt")).toBeNull();
+  });
+});
+
+describe("Recover screen", () => {
+  test("picking a drive reads its partition table straight away, once", () => {
+    vi.mocked(api.startScan).mockReset().mockResolvedValue(undefined);
+    useApp.setState({ devices: [{ ...systemDrive, system: false }], devicesState: "loaded", elevated: true });
+    render(<RecoverScreen />);
+    fireEvent.click(screen.getByRole("radio", { name: /Samsung SSD 980 PRO/ }));
+    expect(api.startScan).toHaveBeenCalledWith(systemDrive.path, false);
+
+    // Already read: picking it again doesn't read the drive again.
+    useApp.setState({ running: null });
+    useScan.setState({ scanning: "", result: { kind: "gpt", partitions: [], source: systemDrive.path, deviceSize: 1 } });
+    fireEvent.click(screen.getByRole("radio", { name: /Samsung SSD 980 PRO/ }));
+    expect(api.startScan).toHaveBeenCalledTimes(1);
   });
 });

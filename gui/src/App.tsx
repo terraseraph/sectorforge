@@ -1,5 +1,6 @@
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
 import { AppDialog } from "./components/AppDialog";
+import { FilePicker } from "./components/FilePicker";
 import { Console } from "./components/Console";
 import { CliBanner, Nav, StatusBar } from "./components/Shell";
 import { DrivesScreen } from "./screens/DrivesScreen";
@@ -47,6 +48,7 @@ export function App() {
           <Console />
         </div>
         <StatusBar />
+        <FilePicker />
         <AppDialog />
       </div>
     </MotionConfig>

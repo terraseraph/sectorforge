@@ -18,7 +18,7 @@ export interface FileRow {
 }
 
 export type Ev =
-  | { event: "start"; source: string; mode: "device" | "file"; size: number; sector_size: number; resumed: boolean }
+  | { event: "start"; source: string; mode: "device" | "file"; access?: "os" | "scsi" | "ata" | "file"; size: number; sector_size: number; resumed: boolean }
   | { event: "pass_start"; pass: number; name: string }
   | { event: "progress"; pass: number; current_pos: number; bytes_total: number; bytes_rescued: number; bytes_bad: number; bytes_pending: number }
   | { event: "pass_complete"; pass: number }

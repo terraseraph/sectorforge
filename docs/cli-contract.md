@@ -30,11 +30,18 @@ the GUI exe, which runs a copy of *itself* as the child (`SectorForge.exe sf-cli
   the mapfile at least every 5 seconds and at the end of each pass, so
   re-running the same `image` command resumes from the last checkpoint with
   no loss beyond those few seconds.
+- Global `--access os|scsi|ata` (default `os`) chooses how every command
+  reads a physical drive: through the OS disk driver, or by sending SCSI
+  READ(16) / ATA READ DMA EXT commands straight to the drive (Windows only for
+  now). Pass-through skips the driver's own retries; `--timeout SECS`
+  (default 10) limits each command. Image-file sources ignore both. If the
+  drive or its adapter doesn't support the mode, the command fails at open
+  with an `error` that says so.
 
 Status values (used in maps): `"non_tried"`, `"non_trimmed"`,
 `"non_scraped"`, `"bad_sector"`, `"finished"`.
 
-## `sf-cli image --source S --dest D --map M [--chunk-size N] [--skip-size N] [--retries N] [--retry-only] --json`
+## `sf-cli image --source S --dest D --map M [--chunk-size N] [--skip-size N] [--retries N] [--retry-only] [--reverse] --json`
 
 Source starting with `\\.\` (Windows) or `/dev/` (Linux) = direct hardware
 access (needs elevation); anything else = image file mode.
@@ -42,7 +49,7 @@ access (needs elevation); anything else = image file mode.
 Events, in order:
 
 ```json
-{"event":"start","source":"\\\\.\\PhysicalDrive1","mode":"device","size":2000398934016,"sector_size":512,"resumed":false}
+{"event":"start","source":"\\\\.\\PhysicalDrive1","mode":"device","access":"os","size":2000398934016,"sector_size":512,"resumed":false}
 {"event":"pass_start","pass":1,"name":"copy"}
 {"event":"progress","pass":1,"current_pos":1048576,"bytes_total":2000398934016,"bytes_rescued":1048576,"bytes_bad":0,"bytes_pending":2000397885440}
 {"event":"pass_complete","pass":1}
@@ -52,7 +59,10 @@ Events, in order:
 {"event":"done","totals":{"finished":0,"bad_sector":0,"non_trimmed":0,"non_scraped":0,"non_tried":0}}
 ```
 
-- `mode` is `"device"` or `"file"`.
+- `mode` is `"device"` or `"file"`. `access` is `"os"`, `"scsi"` or `"ata"`
+  for a device, `"file"` for an image file.
+- `--reverse` runs pass 1 from the end of the source towards the start, so
+  `current_pos` falls during it. Pass 2 is unchanged.
 - `progress` is throttled to at most ~5 per second, plus one final event per
   pass. The GUI should not assume a fixed rate.
 - Pass 1 is skipped (no `pass_start` 1) when `--retry-only` is given.
