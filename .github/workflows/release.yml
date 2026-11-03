@@ -1,11 +1,18 @@
 name: Release
 
 # Push a tag like v0.2.0 to build and publish a release.
+# Every push to master rebuilds the "nightly" pre-release, so the latest master is always downloadable.
 # Run manually (Actions > Release > Run workflow) to build the packages without publishing.
 on:
   push:
+    branches: [master]
     tags: ["v*"]
   workflow_dispatch:
+
+# A newer master push replaces an unfinished nightly build; tagged releases always finish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
 
 permissions:
   contents: write
@@ -30,7 +37,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $ver = "${{ github.ref_name }}" -replace '/', '-'
+          $ver = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "nightly" }
           New-Item -ItemType Directory -Force out | Out-Null
           # One portable exe: the engine is built in (it runs itself with `sf-cli` as the first argument).
           Copy-Item gui/src-tauri/target/release/sectorforge-gui.exe "out/SectorForge-$ver-windows-x64.exe"
@@ -82,7 +89,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
       - name: Package
         run: |
-          ver="${GITHUB_REF_NAME//\//-}"
+          ver=$([ "$GITHUB_REF_TYPE" = tag ] && echo "$GITHUB_REF_NAME" || echo nightly)
           mkdir -p out
           cp gui/src-tauri/target/release/bundle/appimage/*.AppImage "out/SectorForge-$ver-x86_64.AppImage"
           chmod +x "out/SectorForge-$ver-x86_64.AppImage"
@@ -95,7 +102,7 @@ jobs:
 
   publish:
     name: Publish GitHub release
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push'
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
@@ -105,7 +112,17 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
+      - name: Replace the nightly pre-release
+        if: github.ref_type == 'branch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "SectorForge nightly (${GITHUB_SHA::7})" \
+            --notes "Built from the latest commit on master. Not a tested release; the stable one is under Latest."
       - name: Create release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >

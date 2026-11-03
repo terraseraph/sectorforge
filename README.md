@@ -18,6 +18,8 @@ Windows and Linux as a portable app: no installer.
 - **Windows 10/11:** [SectorForge-v0.3.0-windows-x64.exe](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-windows-x64.exe)
 - **Linux:** [SectorForge-v0.3.0-x86_64.AppImage](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-x86_64.AppImage) (`chmod +x`, then run it)
 
+**Latest build from master** (rebuilt on every push, untested): [Windows exe](https://github.com/terraseraph/sectorforge/releases/download/nightly/SectorForge-nightly-windows-x64.exe) · [Linux AppImage](https://github.com/terraseraph/sectorforge/releases/download/nightly/SectorForge-nightly-x86_64.AppImage)
+
 Newer versions and the command-line tool are on the [Releases page](https://github.com/terraseraph/sectorforge/releases/latest). See [Download](#download) for notes.
 
 ![SectorForge imaging a disk, finding its partition, recovering deleted files and carving by file type](docs/media/demo.gif)
