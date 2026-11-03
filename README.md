@@ -4,6 +4,12 @@
 [![Release](https://img.shields.io/github/v/release/terraseraph/sectorforge)](https://github.com/terraseraph/sectorforge/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+**Download the latest portable app** (nothing to install, just run it):
+**[Windows 10/11 (.exe)](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-windows-x64.exe)** ·
+**[Linux (.AppImage)](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-x86_64.AppImage)** ·
+[command-line tool and checksums](https://github.com/terraseraph/sectorforge/releases/latest) ·
+[notes](#download)
+
 Rescue data from a failing hard drive. SectorForge clones the drive
 sector by sector, working around bad areas instead of giving up on them,
 then finds the partitions and recovers your files from the copy, including
@@ -12,13 +18,6 @@ deleted ones.
 It brings together ideas from ddrescue, TestDisk/PhotoRec, DMDE and R-Studio
 behind an interface that explains what it is doing and why. It runs on
 Windows and Linux as a portable app: no installer.
-
-**Download the portable app** (always the latest build, nothing to install, just run it):
-
-- **Windows 10/11:** [SectorForge-windows-x64.exe](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-windows-x64.exe)
-- **Linux:** [SectorForge-x86_64.AppImage](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-x86_64.AppImage) (`chmod +x`, then run it)
-
-The command-line tool is on the [Releases page](https://github.com/terraseraph/sectorforge/releases/latest). See [Download](#download) for notes.
 
 ![SectorForge imaging a disk, finding its partition, recovering deleted files and carving by file type](docs/media/demo.gif)
 
