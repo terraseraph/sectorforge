@@ -1,18 +1,17 @@
 name: Release
 
-# Push a tag like v0.2.0 to build and publish a release.
-# Every push to master rebuilds the "nightly" pre-release, so the latest master is always downloadable.
+# Every push to master builds the portable apps and replaces the "latest" release with them.
+# File names carry no version, so .../releases/latest/download/<file> links never change.
 # Run manually (Actions > Release > Run workflow) to build the packages without publishing.
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   workflow_dispatch:
 
-# A newer master push replaces an unfinished nightly build; tagged releases always finish.
+# A newer push replaces an unfinished build.
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref == 'refs/heads/master' }}
+  group: release
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -37,15 +36,14 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $ver = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "nightly" }
           New-Item -ItemType Directory -Force out | Out-Null
           # One portable exe: the engine is built in (it runs itself with `sf-cli` as the first argument).
-          Copy-Item gui/src-tauri/target/release/sectorforge-gui.exe "out/SectorForge-$ver-windows-x64.exe"
-          Compress-Archive target/release/sf-cli.exe, README.md, LICENSE "out/sf-cli-$ver-windows-x64.zip"
+          Copy-Item gui/src-tauri/target/release/sectorforge-gui.exe "out/SectorForge-windows-x64.exe"
+          Compress-Archive target/release/sf-cli.exe, README.md, LICENSE "out/sf-cli-windows-x64.zip"
       - name: Check the exe runs its built-in engine
         shell: pwsh
         run: |
-          $exe = Get-ChildItem out/SectorForge-*-windows-x64.exe | Select-Object -First 1
+          $exe = Get-Item out/SectorForge-windows-x64.exe
           $psi = New-Object System.Diagnostics.ProcessStartInfo $exe.FullName, "sf-cli version --json"
           $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.CreateNoWindow = $true
           $p = [System.Diagnostics.Process]::Start($psi); $out = $p.StandardOutput.ReadToEnd(); $p.WaitForExit()
@@ -89,11 +87,10 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
       - name: Package
         run: |
-          ver=$([ "$GITHUB_REF_TYPE" = tag ] && echo "$GITHUB_REF_NAME" || echo nightly)
           mkdir -p out
-          cp gui/src-tauri/target/release/bundle/appimage/*.AppImage "out/SectorForge-$ver-x86_64.AppImage"
-          chmod +x "out/SectorForge-$ver-x86_64.AppImage"
-          tar -czf "out/sf-cli-$ver-linux-x86_64-static.tar.gz" README.md LICENSE \
+          cp gui/src-tauri/target/release/bundle/appimage/*.AppImage out/SectorForge-x86_64.AppImage
+          chmod +x out/SectorForge-x86_64.AppImage
+          tar -czf out/sf-cli-linux-x86_64-static.tar.gz README.md LICENSE \
             -C target/x86_64-unknown-linux-musl/release sf-cli
       - uses: actions/upload-artifact@v4
         with:
@@ -101,7 +98,7 @@ jobs:
           path: out/*
 
   publish:
-    name: Publish GitHub release
+    name: Publish the latest release
     if: github.event_name == 'push'
     needs: [windows, linux]
     runs-on: ubuntu-latest
@@ -112,21 +109,12 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
-      - name: Replace the nightly pre-release
-        if: github.ref_type == 'branch'
+      - name: Replace the latest release
         env:
           GH_TOKEN: ${{ github.token }}
+          MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          gh release delete nightly --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
-          gh release create nightly dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
-            --title "SectorForge nightly (${GITHUB_SHA::7})" \
-            --notes "Built from the latest commit on master. Not a tested release; the stable one is under Latest."
-      - name: Create release
-        if: github.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >
-          gh release create "$GITHUB_REF_NAME" dist/*
-          --repo "$GITHUB_REPOSITORY"
-          --title "SectorForge $GITHUB_REF_NAME"
-          --generate-notes
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes || true
+          gh release create latest dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+            --title "SectorForge (${GITHUB_SHA::7})" \
+            --notes "Built from master at $GITHUB_SHA: $MESSAGE"

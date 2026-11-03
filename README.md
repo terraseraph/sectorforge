@@ -13,14 +13,12 @@ It brings together ideas from ddrescue, TestDisk/PhotoRec, DMDE and R-Studio
 behind an interface that explains what it is doing and why. It runs on
 Windows and Linux as a portable app: no installer.
 
-**Download the portable app** (v0.3.0, nothing to install, just run it):
+**Download the portable app** (always the latest build, nothing to install, just run it):
 
-- **Windows 10/11:** [SectorForge-v0.3.0-windows-x64.exe](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-windows-x64.exe)
-- **Linux:** [SectorForge-v0.3.0-x86_64.AppImage](https://github.com/terraseraph/sectorforge/releases/download/v0.3.0/SectorForge-v0.3.0-x86_64.AppImage) (`chmod +x`, then run it)
+- **Windows 10/11:** [SectorForge-windows-x64.exe](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-windows-x64.exe)
+- **Linux:** [SectorForge-x86_64.AppImage](https://github.com/terraseraph/sectorforge/releases/latest/download/SectorForge-x86_64.AppImage) (`chmod +x`, then run it)
 
-**Latest build from master** (rebuilt on every push, untested): [Windows exe](https://github.com/terraseraph/sectorforge/releases/download/nightly/SectorForge-nightly-windows-x64.exe) · [Linux AppImage](https://github.com/terraseraph/sectorforge/releases/download/nightly/SectorForge-nightly-x86_64.AppImage)
-
-Newer versions and the command-line tool are on the [Releases page](https://github.com/terraseraph/sectorforge/releases/latest). See [Download](#download) for notes.
+The command-line tool is on the [Releases page](https://github.com/terraseraph/sectorforge/releases/latest). See [Download](#download) for notes.
 
 ![SectorForge imaging a disk, finding its partition, recovering deleted files and carving by file type](docs/media/demo.gif)
 
@@ -52,14 +50,14 @@ hidden.
 
 ## Download
 
-Get the latest from the **[Releases page](https://github.com/terraseraph/sectorforge/releases/latest)**.
+Get the latest from the **[Releases page](https://github.com/terraseraph/sectorforge/releases/latest)**. It is rebuilt from `master` on every push.
 
 | Platform | File | What it is |
 |---|---|---|
-| Windows 10/11 (x64) | `SectorForge-…-windows-x64.exe` | The app: one portable exe. Put it anywhere and run it. |
-| Linux (x86_64) | `SectorForge-…-x86_64.AppImage` | The app. `chmod +x`, then run it. |
-| Windows | `sf-cli-…-windows-x64.zip` | Command-line tool only. |
-| Linux | `sf-cli-…-linux-x86_64-static.tar.gz` | Command-line tool only, fully static: runs on any distro. |
+| Windows 10/11 (x64) | `SectorForge-windows-x64.exe` | The app: one portable exe. Put it anywhere and run it. |
+| Linux (x86_64) | `SectorForge-x86_64.AppImage` | The app. `chmod +x`, then run it. |
+| Windows | `sf-cli-windows-x64.zip` | Command-line tool only. |
+| Linux | `sf-cli-linux-x86_64-static.tar.gz` | Command-line tool only, fully static: runs on any distro. |
 
 `SHA256SUMS.txt` lists checksums for every file.
 
